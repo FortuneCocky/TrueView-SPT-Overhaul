@@ -1,0 +1,10 @@
+bin/
+obj/
+build_log.txt
+*.user
+.vs/
+# runtime data and engine binaries are shipped in releases, not in source
+*.dll
+*.bin
+*.zip
+metadump/
