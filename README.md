@@ -6,13 +6,13 @@ TrueView bundles client mods that are built to work together:
 
 | Mod | What it does |
 |---|---|
-| **TrueView** | Weapon handling and body movement: weight, deadzone, sway, inertia, camera motion |
+| **TrueView** | Weapon handling and body movement: weight, deadzone, sway, momentum, a body camera, near misses |
 | **Tactical Stances** | Low ready, high ready, active aim, canted aim and shoulder swap |
 | **Dynamic DoF** | Eye-like depth of field that focuses on whatever you look at |
-| **BloodFX** | Fully volumetric blood: spurts, drips, trails, pools, wounds and armor impacts |
+| **BloodFX** | Fully volumetric blood: spurts, drips, trails, pools, wounds, armor impacts and head dismemberment |
 | **Euphoria Reactions** *(coming soon)* | Physics-driven hit reactions: bots stagger, catch themselves, buckle, fall and get back up |
 
-> **Euphoria Reactions isn't in the release zip yet.** Its physics body is being rebuilt from Tarkov's own ragdoll so it needs no outside game data. Its source is here; it will ship in a later release.
+> **Euphoria Reactions isn't in the release zip yet.** It now runs on its own physics body built from Tarkov's skeleton, with no outside game data. Its source is here; it will ship in a later release.
 
 Each one has its own config file. Turn any of them off or tune it however you like.
 
@@ -28,12 +28,14 @@ Your weapon stops being glued to the centre of the screen.
 - **Sway and inertia.** Breathing, walking, fatigue and the weapon's own momentum all move the gun.
 - **Camera lag.** Your head trails the weapon instead of being bolted to it.
 - **Recoil that misaligns.** Every shot knocks the gun off target, and tired arms make it worse.
+- **Hand kick.** In hip fire, each shot kicks the gun up and back around your grip, and it settles in about a tenth of a second.
 - **Collision-aware ADS.** The gun pulls back near walls instead of clipping through them.
 
 ## 🏃 TrueView — body and camera
 
-- **Head-mounted camera.** The view moves with your character's head: steps, lean and body sway. It fades out while aiming so your sights stay steady.
-- **Turn lean and real Q/E lean.** Your body banks into turns.
+- **Body camera.** The view rides your chest like a bodycam: it trails a little behind turns, rolls with each uneven footstep, jolts with every shot without climbing, knocks back on hits and near misses, drifts when you're hurt and rises and falls with your breathing. It only moves what you see, so your gun, aim and deadzone are never thrown off, and it fades out while aiming.
+- **Momentum.** Speed builds up as your body pushes off: about 0.3 s to a walk, 0.45 s to a run and 0.65 s into a sprint, longer when you're loaded, tired or hurt. Changing direction brakes first. It never makes you faster than the game would.
+- **Start, stop and strafe lean.** Your head leans into a move as you get going, tips into the brake when you stop and rolls into strafes. Turns bank your body, and Q/E lean is real.
 - **Turn-in-place footwork.** Small turns twist your torso. Bigger ones make your feet step, with a weight-scaled dip. Heavy gear makes the step slower and heavier.
 - **Landing and crouch dips.** The camera dips when you land from a fall (harder the further you fell) and when you crouch.
 - **Focus zoom.** A subtle tunnel-vision zoom when you settle on a target while aiming (off while mounted).
@@ -41,8 +43,11 @@ Your weapon stops being glued to the centre of the screen.
 ## ❤️ TrueView — stress and injury
 
 - **Adrenaline.** Taking hits or hearing gunfire nearby raises adrenaline. It causes a slight hand tremor, a tunnel-vision pinch and a low heartbeat you can hear, then decays over several seconds.
+- **Near misses.** A round passing close makes you flinch away from the side it passed, harder the closer it came, and raises adrenaline. Custom whiz sounds can replace the game's flyby sound.
 - **Breathing.** You hear and feel breathing that matches your stamina, from calm nose breathing to heavy panting after a sprint. Holding your breath silences it.
+- **Calming down.** After a fight, heavy breathing slowly settles into nose breathing: a short calm-down after a distant shot, a long one after a real firefight. A fresh hit or nearby fire cuts straight back to heavy breathing.
 - **Injuries matter.** Wounded arms shake and slow your handling. Crippled legs force a limp.
+- **Tired arms.** Sway grows as arm stamina drains, steeply near empty, and below about a third your arms start to tremble. Holding your breath steadies them.
 - **Stamina.** Exhaustion adds tremor and sway.
 - **Reload efficiency.** Reload speed follows your weapon's ergonomics and the health of your arms.
 
@@ -90,7 +95,9 @@ Blood that is actual 3D geometry, not flat sprites. Every drop collides with the
 
 **On the hit**
 - **Exit spurts and ribbons.** Glossy ropes of blood burst from exit wounds, peel off thin strands and break into drops.
-- **Headshots** throw forked ribbons sideways across your view, with a dense cloud of drops.
+- **Headshots** throw forked ribbons sideways across your view, with a dense cloud of drops. Close to a wall, they paint it with layered spatter, a dark core and drips that creep down for seconds.
+- **Brain matter.** Headshots can throw glossy chunks and skull chips that tumble, splat and slide down walls.
+- **Head dismemberment.** A killing headshot can take off half the face or the whole head, leaving a ragged wound or neck stump that pumps and drips. Helmets, masks and glasses fly off as separate pieces. It's visual only: the real items stay on the body.
 - **Mist burst.** Every hit puffs a dense dark-red burst that tears into a web of fine strands and droplets within a fraction of a second.
 - **Spray.** Drops in realistic sizes (many tiny, a few heavy) that fall and splatter wherever they hit.
 
@@ -98,17 +105,18 @@ Blood that is actual 3D geometry, not flat sprites. Every drop collides with the
 - **Drops stick where they hit**, as small domed beads with tails pointing the way they flew.
 - **Wall splashes** burst across the surface and leave a stain made of real beads.
 - **Ground trails.** Blood that hits the ground while moving drags out into a thick, ragged, glossy smear.
-- **Drips.** Wounds keep forming hanging teardrops that let go and fall. Each one lands as a bead that merges with the ones before it into a growing blob.
+- **Drips.** Wounds keep forming hanging teardrops that let go and fall. Each one lands as a bead that merges with the ones before it into a growing blob. A bleeding character leaves a trail of real drops instead of the game's flat stains.
 - **Pools.** Bodies leave a thick, glossy pool that oozes out from underneath over half a minute and stops at ledges instead of hanging in the air.
 - **Decals follow surfaces.** Marks bend over steps and bumps, and nothing floats past edges or doorways.
 
 **On the body**
-- **Bullet wounds** are a dark wet hole with a ragged ring of torn flesh and a trickle running down.
+- **Bullet wounds** are real size: a dark wet hole with a ragged ring of torn flesh, some with a trickle running down.
 - **Armor hits** leave a grey and black mark instead of blood: punch mark, cracks and grainy dust.
 - **Wrapped onto the character.** Wounds and armor marks are cut from the character's own model, so they wrap over plates, pouches, folds and skin and move with the body.
 
 **Performance and control**
 - **Quality tiers** (Low, Medium, High) and hard caps on everything.
+- **Adapts to your frame rate.** When frames get slow, it spawns fewer drops and strands until they recover. The heavy gore meshing runs on a background thread.
 - **Distance culling.** Only hits you can see spawn effects.
 - **Toggles** for each effect: wounds, drips, pools, streams, armor marks, and blood from hits on you.
 
@@ -119,7 +127,9 @@ Blood that is actual 3D geometry, not flat sprites. Every drop collides with the
 Bots react to being shot with their whole body, driven by a real-time physics simulation instead of canned animations. The bullet's push lands where it hit, the body's muscles and balance fight it, and what happens next is different every time.
 
 **Getting hit**
-- **Stumbles.** A solid hit hands the bot to physics. He takes catch-steps, buckles, staggers, and either rights himself or goes over.
+- **Stumbles.** A solid hit hands the bot to physics. He takes real steps (his feet don't skate), buckles, staggers, and either rights himself or goes over. How long a stumble can last is a preset (Short, Natural, Long) or your own range.
+- **Balance presets.** Engine, Tough, Classic or Natural set how hard he fights to stay up.
+- **The gun stays in his hand.** It's held by its own grip point the whole time, so it never floats off while he stumbles or falls.
 - **He catches himself.** A bot that starts falling while still upright may plant a foot or a hand and recover. A wall or a knee already down sends him over anyway.
 - **Hit nudges.** Every hit that doesn't start a stumble still rocks the body where it landed: the chest rocks, the head whips, a knee dips.
 - **Heavy limb hits.** A massive arm or leg hit sends that limb limp for a moment. Legs kick out and the free arm drops. Hard enough hits tear the gun out of his hand.
@@ -135,7 +145,8 @@ Bots react to being shot with their whole body, driven by a real-time physics si
 **Going down and getting up**
 - **Falls.** Heavy hits and leg shots can knock a living bot down. He stays down for a moment, then gets up.
 - **Physical get-ups.** He rises from his belly, back or side, with his hands and knees pushing on the real floor, so he gets up with weight instead of a canned animation. Hit him while he's rising and he goes back down.
-- **Badly hurt bots stay prone** instead of getting up.
+- **He recovers by health.** A healthy bot gets back to standing, a hurt one to a crouch or deep crouch, and a badly hurt one stays prone. Getting up into a crouch rises straight into it instead of standing and sinking.
+- **Smooth hand-back.** The return to his normal animation keeps the motion he was in and eases out, with no frozen pose sliding into place.
 - **Fall damage.** Crashing into the ground or a wall hurts a living bot.
 
 **Deaths**
@@ -186,7 +197,7 @@ Each mod is its own project in this repo:
 2. Point the `SPTDir` (or `SPT_INSTALL_DIR`) property in each `.csproj` at your SPT folder. The game and BepInEx assemblies are referenced from there and are not included here.
 3. Run `dotnet build -c Release` in a mod's folder, or its `build_*.bat`, which also copies the DLL into your SPT plugins folder.
 
-Euphoria Reactions also needs `delirium_physics.dll` from the [Delirium physics engine](https://github.com/YoucefNabil/delirium-physics) and its character and animation data files next to the DLL. It is still in development and not in the release zip yet.
+Euphoria Reactions also needs `delirium_physics.dll` from the [Delirium physics engine](https://github.com/YoucefNabil/delirium-physics) and `getups.bin` (the get-up clips) next to its DLL. Its `body.json` and `presets/` are in this repo and are copied by `build_euphoria.bat`. It is not in the release zip yet.
 
 ## 🙏 Credits
 
