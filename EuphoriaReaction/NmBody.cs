@@ -30,6 +30,7 @@ internal partial class NmBody : MonoBehaviour
     private float _blendDur = BlendOut, _downSince;
 
     private static bool _init;
+    internal const string BodyFile = "body.json";
     private static IntPtr _baseBuild;
     internal static IntPtr BaseBuild => _baseBuild;
 
@@ -58,15 +59,15 @@ internal partial class NmBody : MonoBehaviour
     {
         if (_init) return;
         _pluginDir = dir;
-        byte[] xrt = File.ReadAllBytes(Path.Combine(dir, "fred.xrt"));
-        if (nm_init_memory(xrt, xrt.Length) < 0)
-            throw new Exception("nm_init: " + LastError());
-        string tp = Path.Combine(dir, "taskparams.txt");
+        // the physics character: our own, laid out on Tarkov's skeleton (character/make_character.py)
+        string body = File.ReadAllText(Path.Combine(dir, BodyFile));
+        if (nm_init_character(body) < 0)
+            throw new Exception(BodyFile + ": " + LastError());
+        string tp = Path.Combine(dir, "taskparams.txt"); // optional behaviour tuning overrides; the engine has defaults
         if (File.Exists(tp)) nm_load_task_params(tp);
-        _baseBuild = nm_build_load(Path.Combine(dir, "ped_build.txt"));
-        if (_baseBuild == IntPtr.Zero) throw new Exception("ped_build.txt: " + LastError());
-        LoadJointModel(dir);
-        LoadEftShapes(dir);
+        _baseBuild = nm_build_from_character(body);
+        if (_baseBuild == IntPtr.Zero) throw new Exception(BodyFile + " (build): " + LastError());
+        LoadJointModel(body);
         GunMarkers.Load(dir);
         CaptureInit(dir);
         _init = true;

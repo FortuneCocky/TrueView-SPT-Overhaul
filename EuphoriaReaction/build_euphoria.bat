@@ -11,4 +11,5 @@ if errorlevel 1 (echo BUILD FAILED >> "%LOG%" & exit /b 1)
 copy /y "bin\Release\EuphoriaReaction.dll" "J:\Games\SPT 4.1.6\BepInEx\plugins\EuphoriaReaction\EuphoriaReaction.dll" >> "%LOG%" 2>&1
 if errorlevel 1 (echo DEPLOY FAILED - is the game running? >> "%LOG%" & exit /b 1)
 copy /y "getups.bin" "J:\Games\SPT 4.1.6\BepInEx\plugins\EuphoriaReaction\getups.bin" >> "%LOG%" 2>&1
+copy /y "body.json" "J:\Games\SPT 4.1.6\BepInEx\plugins\EuphoriaReaction\body.json" >> "%LOG%" 2>&1
 echo BUILD+DEPLOY OK >> "%LOG%"

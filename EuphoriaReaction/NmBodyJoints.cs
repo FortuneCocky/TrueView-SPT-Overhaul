@@ -8,12 +8,11 @@ using UnityEngine;
 namespace EuphoriaReaction;
 
 /// <summary>
-/// The doll's joint model, so a pose given to it is one it can actually hold. In the build in use
-/// (ped_build.txt) the feet, pelvis, spine2, neck and clavicles are locked to their parent, the
-/// knees and elbows are hinges, the rest ball joints. Seeding a crouch or prone pose straight from
-/// SPT's bones put feet at an ankle angle the doll doesn't have and knees off their hinge; the
-/// solver snapped them back on the first step, which read as the legs and feet twisting.
-/// Hinge axes and ranges come from character_dump.json (rest pose, joint i drives part i+1).
+/// The doll's joint model, so a pose given to it is one it can actually hold. In body.json the knees
+/// and elbows are hinges and the rest ball joints (only the pelvis, the root, is locked). Seeding a
+/// crouch or prone pose straight from SPT's bones put feet at an ankle angle the doll doesn't have and
+/// knees off their hinge; the solver snapped them back on the first step, which read as the legs and
+/// feet twisting. Joint kinds, hinge axes and ranges come from body.json (rest pose, joint i drives part i+1).
 /// </summary>
 internal partial class NmBody
 {
@@ -22,7 +21,7 @@ internal partial class NmBody
     private static readonly float[] _hingeMax = new float[Parts];          // rad, magnitude
     private static readonly float[] _hingeLo = new float[Parts], _hingeHi = new float[Parts]; // rad, the build's own (engine sign)
     private static bool _jointsLoaded;
-    private static readonly Vector3[] _hingeAxisDump = new Vector3[Parts];   // as character_dump.json has it (the unfitted build)
+    private static readonly Vector3[] _hingeAxisDump = new Vector3[Parts];   // as body.json has it (the unfitted build)
     private static readonly Quaternion[] _dumpPartRot = new Quaternion[Parts]; // each part's rest frame there (rows read as its axes)
     private static readonly Quaternion[] _dumpPartRotT = new Quaternion[Parts]; // the same matrix read the other way (columns as its axes)
     private static bool _dumpFrames;
@@ -70,21 +69,20 @@ internal partial class NmBody
         if (note != _hingeRefitNote) { _hingeRefitNote = note; EuphoriaPlugin.Log($"Delirium: {who} {note}; pelvis/spine/thighs agree within {check:F0} deg"); }
     }
 
-    private static void LoadJointModel(string dir)
+    private static void LoadJointModel(string dump)
     {
         try
         {
-            string[] lines = File.ReadAllLines(Path.Combine(dir, "ped_build.txt"));
-            int part = 0;
-            foreach (string line in lines)
-            {
-                string[] t = line.Split(' ');
-                int j = Array.IndexOf(t, "j");
-                if (j < 0 || j + 1 >= t.Length || part >= Parts) continue;
-                _jointKind[part++] = t[j + 1].Length > 0 ? t[j + 1][0] : 'b';
-            }
+            // each build part's joint kind, from its limit: "locked", {"bone_hinge": ...} or {"bone": ...}
+            int buildAt = dump.IndexOf("\"build\"", StringComparison.Ordinal), part = 0;
+            if (buildAt >= 0)
+                foreach (Match m in Regex.Matches(dump.Substring(buildAt), @"""limit"":\s*(""locked""|\{\s*""(\w+)"")"))
+                {
+                    if (part >= Parts) break;
+                    string kind = m.Groups[2].Success ? m.Groups[2].Value : "locked";
+                    _jointKind[part++] = kind == "locked" ? 'l' : kind == "bone_hinge" ? 'h' : 'b';
+                }
 
-            string dump = File.ReadAllText(Path.Combine(dir, "character_dump.json"));
             var rx = new Regex(@"""index"":\s*(\d+).*?""twist_axis"":\s*\[([^\]]*)\].*?""limits"":\s*\[\s*\[\s*([^,\]]+),\s*([^\]]+)\]", RegexOptions.Singleline);
             foreach (Match m in rx.Matches(dump))
             {
@@ -173,7 +171,7 @@ internal partial class NmBody
         offHinge = Quaternion.Angle(delta, Quaternion.AngleAxis(bend, axis));
     }
 
-    // Hip ranges in the build (character_dump.json): about 90 deg forward, ~21 deg twist about the thigh.
+    // Kept well inside the hip ranges in body.json (112 deg forward, 34 deg twist about the thigh).
     // A crouch seeded past them (SPT's deep crouch bends the hips well over 90) was wrenched back into
     // range by the solver on the first steps by rotating the whole leg: knees and feet ended up facing
     // sideways or backwards (legcheck: twist 100-140 deg within 0.2 s of a crouched takeover).
