@@ -50,14 +50,6 @@ internal class Patch_CalculateCameraPosition : ModulePatch
         if (__instance.HandsContainer?.CameraTransform != null)
         {
             __instance.HandsContainer.CameraTransform.localRotation = Quaternion.Euler(HandlingState.HeadRotation);
-            if (ProceduralHipSystem.ControlsCamera)
-            {
-                HeadAttachSystem.Reset();
-            }
-            else
-            {
-                HeadAttachSystem.Apply(player, __instance.HandsContainer.CameraTransform);
-            }
         }
 
         // Apply the shared procedural weapon offset (weapon rotation relative
@@ -76,7 +68,7 @@ internal class Patch_CalculateCameraPosition : ModulePatch
             if (!isLeftStance)
             {
                 __instance.HandsContainer.WeaponRoot.localRotation = ProceduralHipSystem.WeaponOffset * __instance.HandsContainer.WeaponRoot.localRotation;
-                ProceduralHipSystem.ApplyWeaponPosOffset(__instance.HandsContainer.WeaponRoot, __instance.HandsContainer.CameraTransform);
+                ProceduralHipSystem.ApplyWeaponPosOffset(__instance.HandsContainer.WeaponRoot);
             }
         }
     }

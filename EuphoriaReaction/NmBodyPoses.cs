@@ -12,8 +12,6 @@ namespace EuphoriaReaction;
 /// </summary>
 internal partial class NmBody
 {
-    internal enum StartPose { Stand, Crouch, Prone }
-
     private StartPose _startPose;
     private RigBinding _bind;
     private float _comH0 = 1f; // COM height above the floor at takeover: the yardstick for "losing balance"

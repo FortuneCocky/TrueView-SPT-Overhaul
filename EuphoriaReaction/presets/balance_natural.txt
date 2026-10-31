@@ -1,0 +1,22 @@
+; Euphoria Reaction balance preset: Natural
+; Our own values, found offline by character/tune_balance.py: a search over our body's behaviour under
+; 36 kinds of hit (where, from which side, how hard) for lifelike staggers and falls. Use it with the
+; muscle values in body.json, which came from the same search.
+
+NMShot_Standing * {
+  shotMaxSteps                    8       ; engine 6
+  shotBodyStiffness               15.346  ; engine 13.5
+  shotLooseness                   0.847   ; engine 1.0
+  shotUprightStiffness            3.167   ; engine 3.0
+  shotLeanAmount                  0.309   ; engine 0.3
+  shockSpinMin                    10.212  ; engine 40
+  shockSpinMax                    75.907  ; engine 80
+  shotTimeBeforeCollapseWoundLeg  0.440   ; engine 1.0
+}
+
+NMShot_IsMoving * {
+  balanceBodyStiffness            12.822  ; engine 12
+  balanceMaxSteps                 4       ; engine 3
+  balanceLeanAmount               0.050   ; engine 0.4
+  balanceBodyDamping              1.370   ; engine 0.9
+}

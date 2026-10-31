@@ -18,10 +18,24 @@ internal partial class NmBody
     private readonly float[] _gapEnd = new float[Parts];
     private int _gapFrames;
 
+    // the hinge LimbIK gave each knee / elbow (0 L leg, 1 R leg, 2 L arm, 3 R arm): its largest turn from
+    // one frame to the next this reaction, the measure of a limb swinging round
+    private readonly Vector3[] _rollLast = new Vector3[4];
+    private readonly float[] _rollJump = new float[4];
+    private readonly bool[] _rollHave = new bool[4];
+
     private void GapAttach()
     {
         for (int k = 0; k < Parts; k++) _gapMax[k] = _gapClamp[k] = _gapEnd[k] = 0f;
+        for (int s = 0; s < 4; s++) { _rollJump[s] = 0f; _rollHave[s] = false; }
         _gapFrames = 0;
+    }
+
+    private void HingeSeen(int limb, Vector3 hinge)
+    {
+        if (_rollHave[limb]) _rollJump[limb] = Mathf.Max(_rollJump[limb], Vector3.Angle(_rollLast[limb], hinge));
+        _rollLast[limb] = hinge;
+        _rollHave[limb] = true;
     }
 
     /// LateUpdate, after the bones are written from the doll.
@@ -61,6 +75,7 @@ internal partial class NmBody
         foreach (int k in GapEnds)
             if (_gapEnd[k] > 0f) ends.Append(ends.Length == 0 ? "" : ", ").Append(_bones[k].name.Replace("Base Human", "")).Append(' ').Append((_gapEnd[k] * 100f).ToString("F0")).Append("cm");
         EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} SPT vs doll this reaction - joints: {(sb.Length > 0 ? sb.ToString() : "none")}; ends: {(ends.Length > 0 ? ends.ToString() : "n/a")}"
+                           + $"; hinge turn per frame (max): knees {_rollJump[0]:F0}/{_rollJump[1]:F0}, elbows {_rollJump[2]:F0}/{_rollJump[3]:F0} deg"
                            + (_clampReady ? "" : " (joint clamp was off: its setup failed at the takeover)"));
     }
 }

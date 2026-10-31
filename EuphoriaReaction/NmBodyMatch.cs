@@ -73,10 +73,12 @@ internal partial class NmBody
         }
         _clutchBone = -1; // the free hand goes back to the gun, not to the wound
         _matchFromGround = _downSince > 0f || to == StartPose.Prone || TrunkTilt() > 50f;
+        _reachCut = GoingDown ? Time.time - 1f : 0f; // still going down: the hand doesn't go for the gun at all
         _matchFadeFrom = 0f; _matchVisW = 0f;
         _matchTo = to; _matchBind = b; _matchGeom = g;
         _matching = true; _animOk = false; _matchStart = Time.time; _matchErr = 180f;
         EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} moving into {to.ToString().ToLowerInvariant()} before the hand-back");
+        SetPhase(Phase.Recover, $"target {to.ToString().ToLowerInvariant()}");
         return true;
     }
 
@@ -127,6 +129,7 @@ internal partial class NmBody
         if (_lastHitAt > _matchStart || fell)
         {
             EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} stance match cancelled ({(fell ? "fell" : "hit again")})");
+            SetPhase(fell || _matchFromGround ? Phase.Fall : Phase.Stumble, fell ? "fell while recovering" : "hit while recovering");
             _matching = false;
             _matchFadeFrom = _matchVisW; _matchFadeAt = Time.time; // ease off the stance shown, don't drop it
             _matchCooldown = Time.time + 1f; // no new recovery straight away: it looped match/cancel for seconds
@@ -225,7 +228,7 @@ internal partial class NmBody
     private void ApplyStance(StartPose to)
     {
         bool prone = to == StartPose.Prone;
-        float level = to == StartPose.Stand ? 1f : 0.5f;
+        float level = PhaseRules.StanceLevel(to);
         BotActions.SetPose(_p, prone ? 0f : level, prone);
         try
         {
@@ -244,6 +247,7 @@ internal partial class NmBody
         if (st == "Transit2Prone" || st == "Prone2Stand") return false; // still playing the game's own drop / rise
         if (to == StartPose.Prone) return mc.IsInPronePose;
         if (mc.IsInPronePose) return false;
+        if (to == StartPose.DeepCrouch) return mc.PoseLevel <= PhaseRules.DeepCrouchLevel + 0.05f;
         return to == StartPose.Crouch ? mc.PoseLevel < 0.8f : mc.PoseLevel > 0.85f;
     }
 
@@ -256,5 +260,4 @@ internal partial class NmBody
     }
 
     /// Which stance a recovered (not downed) body goes back to.
-    private StartPose RecoverStance() => _crouchStumble || !IsStanding(_p) ? StartPose.Crouch : StartPose.Stand;
 }

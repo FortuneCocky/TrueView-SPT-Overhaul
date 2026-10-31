@@ -76,6 +76,7 @@ internal sealed class BodyDecals
     }
 
     public int Capacity => _e.Length;
+    public int LiveCount => _live;
 
     public void Resize(int capacity)
     {

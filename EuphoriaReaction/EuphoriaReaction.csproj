@@ -46,7 +46,7 @@
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.AnimationModule">
-      <HintPath>$(ManagedDir)\UnityEngine.AnimationModule.dll</HintPath>
+      <HintPath>..\..\SPT 4.1.6\EscapeFromTarkov_Data\Managed\UnityEngine.AnimationModule.dll</HintPath>
     </Reference>
     <Reference Include="UnityEngine.PhysicsModule">
       <HintPath>$(ManagedDir)\UnityEngine.PhysicsModule.dll</HintPath>
@@ -70,6 +70,7 @@
 
   <ItemGroup>
     <Compile Remove="metadump\**" />
+    <Compile Remove="tests\**" />
     <EmbeddedResource Remove="metadump\**" />
     <None Remove="metadump\**" />
   </ItemGroup>

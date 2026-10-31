@@ -188,7 +188,7 @@ public class TacticalStancesPlugin : BaseUnityPlugin
         AutoNormalOnFire = Config.Bind("a - General", "Return To Normal On Fire", true, "When enabled, shooting from any stance moves the weapon to the Fire Return Stance pose, then returns to your selected stance after the delay below.");
         FireReturnDelay = Config.Bind("a - General", "Fire Return Delay (s)", 1.4f, new ConfigDescription("Seconds the weapon stays in the fire-return pose after the last shot before returning to the selected stance.", new AcceptableValueRange<float>(1f, 20f), Array.Empty<object>()));
         FireReturnStance = Config.Bind("a - General", "Fire Return Stance", EStance.ActiveAim, "Pose the weapon transitions to while firing. ActiveAim = shoulders the weapon (recommended — keeps the deadzone feel). None = vanilla normal pose (old behavior).");
-        BlockFireLowHigh = Config.Bind("a - General", "Block Firing In Low/High Ready", false, "When enabled, the trigger does nothing while Low Ready or High Ready is selected. Active Aim and ADS fire normally.");
+        BlockFireLowHigh = Config.Bind("a - General", "Block Firing In Low/High Ready", false, "When enabled, the trigger does nothing while Low Ready or High Ready is selected, or while the weapon is still coming back up out of either. Active Aim and ADS fire normally.");
 
         // Only stamina config exposed — controls stance ARM stamina drain only.
         // Does NOT affect regen or sprint stamina.
@@ -361,16 +361,18 @@ public class TacticalStancesPlugin : BaseUnityPlugin
 
         HandleTacSprint();
 
-        // Deliver a deferred trigger press once the fire-return raise has
-        // converged on the fire pose.
-        TriggerHoldPatch.DeliverPending();
-
         // Tick the stance system — updates transition progress and offsets.
         // The offsets are applied via Spring.Get postfix patches, not here.
         if (localPlayer != null)
         {
             StanceManager.Tick(localPlayer, Mathf.Min(Time.unscaledDeltaTime, 0.2f));
         }
+
+        // Deliver a deferred trigger press once the fire-return raise has
+        // converged on the fire pose. After Tick, so a stance key pressed
+        // this frame has already retargeted the offsets — before it, the
+        // stale targets read as "converged" and the shot slipped out.
+        TriggerHoldPatch.DeliverPending();
     }
 
     private static void HandleTacSprint()

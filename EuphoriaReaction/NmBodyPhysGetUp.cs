@@ -88,6 +88,7 @@ internal partial class NmBody
         if (_lastHitAt > _pguStart)
         {
             PhysGetUpStop("hit");
+            SetPhase(Phase.Fall, "hit during get-up");
             TuneAlive();
             return false; // the reaction carries on from wherever he is
         }
@@ -104,9 +105,10 @@ internal partial class NmBody
         {
             _pgu = false; _pguHave = false;
             _getUp = null;
-            ApplyStance(StartPose.Stand);
-            _blendDur = 0.35f;
-            EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} physical get-up finished{(late ? " (timed out)" : "")} - back to animation (stand)");
+            StartPose to = _recoverTarget == StartPose.Prone ? StartPose.Stand : _recoverTarget; // his recover stance (NmBodyPhase)
+            ApplyStance(to);
+            _blendDur = to == StartPose.Stand || _guWarpAt > 0f ? 0.35f : 0.8f; // a crouch not warped into sinks in over a longer blend
+            EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} physical get-up finished{(late ? " (timed out)" : "")} - back to animation ({to.ToString().ToLowerInvariant()})");
             Release();
         }
         return true;
@@ -224,6 +226,7 @@ internal partial class NmBody
             if (k == 0) _bones[0].SetPositionAndRotation(pelvisTarget, target);
             else _bones[k].rotation = target;
         }
+        WarpTail(fr, last, clip); // into a crouch: the rise bends into it, and the doll follows (NmBodyGetUpWarp)
         for (int k = 0; k < Parts; k++)
             if (_bones[k] != null) { _pguPos[k] = _bones[k].position; _pguRot[k] = _bones[k].rotation; _pguLocal[k] = _bones[k].localRotation; }
         _pguHave = true;

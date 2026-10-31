@@ -70,6 +70,7 @@ internal sealed class BloodPools
     }
 
     public int Capacity => _p.Length;
+    public int LiveCount => _live;
 
     public void Resize(int capacity)
     {
@@ -265,10 +266,9 @@ internal sealed class BloodPools
         float body = (0.5f + 0.15f * s) * mottle * (0.75f + 0.25f * Mathf.Max(0f, Vector3.Dot(n, KeyLight)));
         Vector3 refl = 2f * Vector3.Dot(n, toEye) * n - toEye;
         float spec = Mathf.Pow(Mathf.Max(0f, Vector3.Dot(refl, KeyLight)), 40f) * 0.9f;
-        float fres = Mathf.Pow(1f - Mathf.Clamp01(Vector3.Dot(n, toEye)), 5f) * 0.25f;
+        float fres = Mathf.Pow(1f - Mathf.Clamp01(Vector3.Dot(n, toEye)), 5f) * 0.1f;
         float w = (spec + fres) * gloss;
-        Color c = p.Col;
-        return new Color(c.r * body + w * 0.6f, c.g * body + w * 0.3f, c.b * body + w * 0.3f, 1f);
+        return Wet.Shade(p.Col, body, w);
     }
 
     private void Collapse(int i)

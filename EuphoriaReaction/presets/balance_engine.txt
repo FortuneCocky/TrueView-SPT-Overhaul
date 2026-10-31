@@ -1,0 +1,2 @@
+; Euphoria Reaction balance preset: Engine defaults
+; No overrides: the Delirium engine's own values.

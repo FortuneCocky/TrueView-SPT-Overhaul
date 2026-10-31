@@ -107,6 +107,15 @@ internal static class ProceduralHipSystem
     private static float _bendYawVel;
     private static float _bendInput;
 
+    // Hand kick per shot — the gun jumps up and back about the grip and the
+    // arms snap it back in ~0.1 s. Stiff, under-damped spring.
+    private const float KickOmega = 31f;
+    private const float KickZeta = 0.55f;
+    private static Vector3 _kickPos;
+    private static Vector3 _kickPosVel;
+    private static Vector3 _kickRot;
+    private static Vector3 _kickRotVel;
+
     // Cached weapon offset — computed once per Tick, read many times per frame
     private static Quaternion _cachedWeaponOffset = Quaternion.identity;
     private static Vector3 _cachedWeaponPosOffset = Vector3.zero;
@@ -174,6 +183,38 @@ internal static class ProceduralHipSystem
         _weaponRot = Quaternion.Euler(pitch, yaw, 0f) * _weaponRot;
     }
 
+    /// <summary>
+    /// One shot's hand kick. <paramref name="strength"/> ~1 = a mid-weight gun;
+    /// peaks around 1.2 cm up, 1.5 cm back and 4° of muzzle flip.
+    /// </summary>
+    public static void AddHandKick(float strength)
+    {
+        float s = strength * (HandlingConfig.HandKick?.Value ?? 0f);
+        if (!_initialized || s <= 0f)
+            return;
+        // Impulse = peak * omega / 0.53 (first-peak factor at zeta 0.55).
+        float gain = KickOmega / 0.53f * s;
+        _kickPosVel += new Vector3(Random.Range(-0.002f, 0.002f), 0.012f, -0.015f) * gain;
+        _kickRotVel += new Vector3(-4f * Random.Range(0.8f, 1.2f), Random.Range(-0.8f, 0.8f), Random.Range(-1.2f, 1.2f)) * gain;
+    }
+
+    private static void UpdateHandKick(float dt)
+    {
+        int n = Mathf.CeilToInt(dt / (1f / 240f));
+        float h = dt / n;
+        float k = KickOmega * KickOmega;
+        float c = 2f * KickZeta * KickOmega;
+        for (int i = 0; i < n; i++)
+        {
+            _kickPosVel += (-_kickPos * k - _kickPosVel * c) * h;
+            _kickPos += _kickPosVel * h;
+            _kickRotVel += (-_kickRot * k - _kickRotVel * c) * h;
+            _kickRot += _kickRotVel * h;
+        }
+        _kickPos = Vector3.ClampMagnitude(_kickPos, 0.04f);
+        _kickRot = Vector3.ClampMagnitude(_kickRot, 10f);
+    }
+
     /// <summary>Current hip weapon rotation (used to seed the ADS deadzone).</summary>
     public static Quaternion WeaponRotation => _weaponRot;
 
@@ -199,18 +240,13 @@ internal static class ProceduralHipSystem
     /// not reset the transform since our last write, the previous offset is
     /// removed first — so the offset can never accumulate frame to frame.
     /// </summary>
-    public static void ApplyWeaponPosOffset(Transform weaponRoot, Transform camera = null)
+    public static void ApplyWeaponPosOffset(Transform weaponRoot)
     {
         if (_appliedPosOffset != Vector3.zero && weaponRoot.localPosition == _lastPosResult)
             weaponRoot.localPosition -= _appliedPosOffset;
+        // Weapon offsets only — the body camera is applied at render time and
+        // never reaches the gun, so nothing here may read camera motion.
         Vector3 offset = _cachedWeaponPosOffset;
-        // Camera-space head deltas: the camera translates but WeaponRoot is
-        // its sibling, so without this the gun stays while the view moves —
-        // the weapon spring then chases the gap every frame (gun jitter
-        // while the head camera moves vertically/positionally).
-        Vector3 head = HeadAttachSystem.LastPosDelta;
-        if (camera != null && head.sqrMagnitude > 0f && weaponRoot.parent != null)
-            offset += weaponRoot.parent.InverseTransformVector(camera.TransformVector(head));
         weaponRoot.localPosition += offset;
         _appliedPosOffset = offset;
         _lastPosResult = weaponRoot.localPosition;
@@ -379,6 +415,7 @@ internal static class ProceduralHipSystem
         UpdateNaturalMotion(dt, sprintTarget);
         UpdateProceduralArmMotion(player, dt);
         UpdateBodyTurnLead(dt);
+        UpdateHandKick(dt);
 
         float automaticAdsFloat = isAiming && !HandlingState.IsHoldingBreath
             ? (1f - adsTightness) * (0.06f + stats.WeightProgress * 0.14f + fatigue * 0.38f + movement * 0.28f)
@@ -472,6 +509,17 @@ internal static class ProceduralHipSystem
         armEuler.z += _wristRollCurrent;
         if (applyHipMotion && armEuler != Vector3.zero)
             baseOffset = Quaternion.Euler(armEuler) * baseOffset;
+
+        // Hand kick: flips about the grip so the muzzle rises while the hands
+        // ride up and back. Fades out with the sights (pivot blend).
+        float kickBlend = 1f - _pivotBlend;
+        if (kickBlend > 0.001f && (_kickRot != Vector3.zero || _kickPos != Vector3.zero))
+        {
+            Quaternion kickRot = Quaternion.Euler(_kickRot * kickBlend);
+            posOffset += MuzzleHandPivot - kickRot * MuzzleHandPivot;
+            posOffset += _kickPos * kickBlend;
+            baseOffset = kickRot * baseOffset;
+        }
 
         if (HandlingState.IsAiming && _adsFloat != Vector2.zero)
             baseOffset = Quaternion.Euler(_adsFloat.y, _adsFloat.x, 0f) * baseOffset;
@@ -600,7 +648,7 @@ internal static class ProceduralHipSystem
         float omega = Mathf.Clamp(speed * HandlingConfig.LazyTension.Value * Mathf.Lerp(1f, 0.68f, w), 1.5f, 30f);
         float zeta = Mathf.Clamp((1f - HandlingConfig.LazySpringiness.Value * 0.35f) * Mathf.Lerp(1f, 0.72f, w), 0.16f, 1.2f);
 
-        // Low-pass the spring's target: head-cam systems (HeadAttach, camera
+        // Low-pass the spring's target: camera systems (camera
         // lag, momentum) write into the camera rotation every frame, and at
         // cranked settings that output carries frame-rate noise. Feeding the
         // raw target into an under-damped spring makes it ring — so the spring
@@ -1086,6 +1134,10 @@ internal static class ProceduralHipSystem
         _lazyPrevErrPitch = 0f;
         _lazyPos = Vector3.zero;
         _lazyPosVel = Vector3.zero;
+        _kickPos = Vector3.zero;
+        _kickPosVel = Vector3.zero;
+        _kickRot = Vector3.zero;
+        _kickRotVel = Vector3.zero;
         _lazyPitchVel = 0f;
         _cachedWeaponOffset = Quaternion.identity;
         _cachedWeaponPosOffset = Vector3.zero;

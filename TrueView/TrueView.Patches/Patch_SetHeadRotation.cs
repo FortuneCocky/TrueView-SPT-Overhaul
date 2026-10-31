@@ -69,9 +69,7 @@ internal class Patch_SetHeadRotation : ModulePatch
 			headRot = FluidMovementSystem.Modify(headRot);
 		}
 
-		headRot = LocomotionGaitSystem.ModifyCamera(headRot);
 		headRot = TurnInPlaceSystem.ModifyCamera(headRot);
-		headRot = HeadAttachSystem.ApplyShotShake(headRot);
 		HandlingState.HeadRotation = headRot;
 	}
 }

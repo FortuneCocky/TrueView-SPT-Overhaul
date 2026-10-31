@@ -57,6 +57,7 @@ internal sealed class BloodTrails
     }
 
     public int Capacity => _t.Length;
+    public int LiveCount => _live;
 
     public void Resize(int capacity)
     {
@@ -105,7 +106,8 @@ internal sealed class BloodTrails
     /// <param name="dir">Travel direction along the surface.</param>
     /// <param name="start">When the blood reaches the surface (may be in the future).</param>
     /// <param name="dur">Seconds for the smear to drag out to full length.</param>
-    public void Add(Vector3 pos, Vector3 normal, Vector3 dir, float length, float width, Color col, float start, float dur, float life)
+    /// <param name="wander">How much the path meanders (0 = dead straight, like a drip running down a wall).</param>
+    public void Add(Vector3 pos, Vector3 normal, Vector3 dir, float length, float width, Color col, float start, float dur, float life, float wander = 1f)
     {
         int i = _next;
         _next = (_next + 1) % _t.Length;
@@ -127,6 +129,8 @@ internal sealed class BloodTrails
         if (head.sqrMagnitude < 1e-6f) head = Vector3.Cross(n, Vector3.right);
         head.Normalize();
         int b = i * Samples, count = 0;
+        // the tail end rounds off over about one width (at least a few samples) instead of starting square
+        float tailF = Mathf.Clamp(width * 0.9f / Mathf.Max(length, 0.01f), 5f / (Samples - 1), 0.3f);
         for (int k = 0; k < Samples; k++)
         {
             float f = k / (float)(Samples - 1);
@@ -134,16 +138,20 @@ internal sealed class BloodTrails
             _p[b + k] = p;
             _n[b + k] = n;
             _s[b + k] = side;
-            // wide landing blob, then a body that narrows toward the head; ragged on both sides
-            float body = Mathf.Lerp(1f, 0.75f, f) + 0.6f * Mathf.Exp(-f * f * 60f);
-            float jagL = 0.65f + 0.5f * Mathf.PerlinNoise(seed, k * 1.3f) + 0.5f * (Hash(seed + k) - 0.5f);
-            float jagR = 0.65f + 0.5f * Mathf.PerlinNoise(seed + 9f, k * 1.3f) + 0.5f * (Hash(seed + 50f + k) - 0.5f);
+            // rounded tail, a slight swell where the drop landed, then a body that narrows toward the head;
+            // a little ragged on both sides (less so on the rounded tail)
+            float t = Mathf.Clamp01(f / tailF);
+            float tail = Mathf.Sqrt(1f - (1f - t) * (1f - t));
+            float body = tail * (Mathf.Lerp(1f, 0.6f, f) + 0.2f * Mathf.Exp(-(f - tailF) * (f - tailF) * 80f));
+            float rag = 0.3f * t;
+            float jagL = 1f - rag + rag * (Mathf.PerlinNoise(seed, k * 1.3f) + 0.6f * (Hash(seed + k) - 0.5f));
+            float jagR = 1f - rag + rag * (Mathf.PerlinNoise(seed + 9f, k * 1.3f) + 0.6f * (Hash(seed + 50f + k) - 0.5f));
             _wl[b + k] = width * 0.5f * body * jagL;
             _wr[b + k] = width * 0.5f * body * jagR;
             count = k + 1;
             if (k == Samples - 1) break;
 
-            float turn = bend * 0.25f + (Mathf.PerlinNoise(seed + 20f, k * 0.15f) - 0.5f) * 0.1f;
+            float turn = (bend * 0.25f + (Mathf.PerlinNoise(seed + 20f, k * 0.15f) - 0.5f) * 0.1f) * wander;
             head = Quaternion.AngleAxis(turn * Mathf.Rad2Deg, n) * head;
             Vector3 q = p + head * step;
             if (!Physics.Raycast(q + n * 0.1f, -n, out RaycastHit hit, 0.25f, _mask, QueryTriggerInteraction.Ignore)) break;
@@ -245,7 +253,7 @@ internal sealed class BloodTrails
         float body = (a == 2 ? 0.55f : a == 0 || a == 4 ? 0.7f : 0.6f) * (0.75f + 0.25f * Mathf.Max(0f, Vector3.Dot(n, KeyLight)));
         Vector3 refl = 2f * Vector3.Dot(n, toEye) * n - toEye;
         float spec = Mathf.Pow(Mathf.Max(0f, Vector3.Dot(refl, KeyLight)), 40f) * 0.9f * gloss;
-        return new Color(c.r * body + spec * 0.6f, c.g * body + spec * 0.3f, c.b * body + spec * 0.3f, 1f);
+        return Wet.Shade(c, body, spec);
     }
 
     private void Collapse(int i, Vector3 at)

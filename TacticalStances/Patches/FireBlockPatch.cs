@@ -6,9 +6,11 @@ using HarmonyLib;
 namespace TacticalStances;
 
 /// <summary>
-/// Blocks firing while Low Ready or High Ready is selected by swallowing the
-/// trigger press before the firing pipeline starts. ADS and Active Aim fire
-/// normally; trigger releases always pass through.
+/// Blocks firing while Low Ready or High Ready is selected, and while the
+/// weapon is still swinging back out of either pose, by swallowing the
+/// trigger press before the firing pipeline starts. ADS fires normally;
+/// Active Aim fires once the muzzle has converged on the forward pose.
+/// Trigger releases always pass through.
 /// </summary>
 [HarmonyPatch]
 public static class FireBlockPatch
@@ -28,7 +30,10 @@ public static class FireBlockPatch
         }
     }
 
+    // Runs before TriggerHoldPatch so a blocked press is swallowed outright
+    // rather than deferred (and raising the weapon) by the fire-return hold.
     [HarmonyPrefix]
+    [HarmonyPriority(Priority.First)]
     private static void Prefix(Player.FirearmController __instance, ref bool pressed)
     {
         if (!pressed)
@@ -36,8 +41,11 @@ public static class FireBlockPatch
         if (!TacticalStancesPlugin.EnableStances.Value || !TacticalStancesPlugin.BlockFireLowHigh.Value)
             return;
 
+        // The selected stance flips the instant the key is pressed, long
+        // before the muzzle is back up — so also gate on the applied pose.
         var stance = TacticalStancesPlugin.DesiredStance;
-        if (stance != EStance.LowReady && stance != EStance.HighReady)
+        if (stance != EStance.LowReady && stance != EStance.HighReady &&
+            !StanceManager.LowHighPoseActive)
             return;
 
         // ADS fires regularly regardless of stance.

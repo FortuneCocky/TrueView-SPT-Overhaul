@@ -77,6 +77,22 @@ public static class StanceManager
            (_currentPosOffset - _targetPosOffset).sqrMagnitude > 2.5e-5f || // ~5mm
            (_currentLeanSwapPos - _targetLeanSwapPos).sqrMagnitude > 2.5e-5f;
 
+    /// <summary>
+    /// True while the weapon is posed in Low/High Ready or is still swinging
+    /// back out of it. Set from the pose actually applied last Tick, so it
+    /// stays true on the frame the stance key flips DesiredStance and only
+    /// clears once the offsets have converged on the new (forward) pose.
+    /// </summary>
+    internal static bool LowHighPoseActive { get; private set; }
+
+    private static void UpdateLowHighPose()
+    {
+        if (_activeStance == EStance.LowReady || _activeStance == EStance.HighReady)
+            LowHighPoseActive = true;
+        else if (!OffsetBeyondThreshold)
+            LowHighPoseActive = false;
+    }
+
 
     // Cached references
     private static ProceduralWeaponAnimation _pwa;
@@ -149,6 +165,7 @@ public static class StanceManager
             SmoothVec(ref _currentRotOffset, ref _rotVel, Vector3.zero, 35f, dt);
             SmoothVec(ref _currentLeanSwapPos, ref _leanSwapPosVel, Vector3.zero, 35f, dt);
             SmoothVec(ref _currentLeanSwapRot, ref _leanSwapRotVel, Vector3.zero, 35f, dt);
+            UpdateLowHighPose();
             return;
         }
 
@@ -212,6 +229,7 @@ public static class StanceManager
             _leanSwapRotVel = Vector3.zero;
             _activeStance = EStance.None;
             UpdateStamina(player, dt);
+            UpdateLowHighPose();
             return;
         }
 
@@ -266,6 +284,7 @@ public static class StanceManager
         // Rotation is applied in ApplyStanceOffsetForIK / ApplyStanceOffsetForVisual.
 
         UpdateStamina(player, dt);
+        UpdateLowHighPose();
     }
 
     /// <summary>
@@ -522,6 +541,7 @@ public static class StanceManager
     private static void ResetState()
     {
         _activeStance = EStance.None;
+        LowHighPoseActive = false;
         _targetPosOffset = Vector3.zero;
         _targetRotOffset = Vector3.zero;
         _currentPosOffset = Vector3.zero;
@@ -557,6 +577,7 @@ public static class StanceManager
         _leanSwapPosVel = Vector3.zero;
         _leanSwapRotVel = Vector3.zero;
         _activeStance = EStance.None;
+        LowHighPoseActive = false;
     }
 
     private static EFT.InventoryLogic.Item _weightItem;

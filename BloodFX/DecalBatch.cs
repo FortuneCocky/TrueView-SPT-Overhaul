@@ -56,6 +56,7 @@ internal sealed class DecalBatch
     }
 
     public int Capacity => _d.Length;
+    public int LiveCount => _live;
 
     /// <summary>Reallocates the buffer (settings change only) and clears it.</summary>
     public void Resize(int capacity)

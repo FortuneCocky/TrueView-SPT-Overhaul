@@ -51,7 +51,12 @@ internal static class ShotSystem
 		float headKick = breathHoldScale * Mathf.Lerp(0.35f, 0.8f, stats.WeightProgress) *
 			Mathf.Lerp(0.85f, 1.25f, fatigue) * (aiming ? 0.7f : 1f) * skillScale *
 			(1f + InjuryHandlingSystem.HeadPenalty * 0.35f + InjuryHandlingSystem.TorsoPenalty * 0.2f);
-		HeadAttachSystem.AddShotImpulse(HandlingMath.SignedRandom(headKick * 0.35f), headKick);
+		BodyCamSystem.OnShot(headKick);
+
+		// Hands: a fast up-and-back kick about the grip, back in ~0.1 s.
+		float handKick = Mathf.Lerp(0.75f, 1.3f, stats.WeightProgress) * skillScale *
+			Mathf.Lerp(1f, 1.25f, fatigue) * InjuryHandlingSystem.RecoilMultiplier * breathHoldScale;
+		ProceduralHipSystem.AddHandKick(handKick);
 
 		if (HandlingConfig.ShotMisalignmentEnabled.Value)
 		{

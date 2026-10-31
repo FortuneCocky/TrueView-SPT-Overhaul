@@ -25,7 +25,6 @@ internal static class LocomotionGaitSystem
     private static float _weaponFollow = 1f;
     private static float _momentum = 1f;
     private static float _phase;
-    private static Vector3 _cameraOffset;
 
     public static ELocomotionGait CurrentGait => _currentGait;
     public static float WeaponFollowMultiplier => _weaponFollow;
@@ -54,24 +53,8 @@ internal static class LocomotionGaitSystem
         _currentGait = targetGait;
 
         float speed = new Vector2(player.Velocity.x, player.Velocity.z).magnitude;
-        float movementBlend = Mathf.Clamp01(speed / 0.8f);
+        // Footfalls drive the body camera (BodyCamSystem reads StepPhase).
         _phase += dt * _cadence * Mathf.PI * 2f * Mathf.Lerp(0.6f, 1.25f, Mathf.Clamp01(speed / 5f));
-
-        float intensity = HandlingConfig.GaitIntensity.Value;
-        float fatigue = 1f - Mathf.Min(HandlingState.Stamina01, HandlingState.Oxygen01);
-        float irregularity = targetGait == ELocomotionGait.ExhaustedSprint ? 1f + fatigue * 0.35f : 1f;
-        float amplitude = _cameraAmplitude * intensity * movementBlend * irregularity * InjuryHandlingSystem.GaitInstability;
-        float adsScale = HandlingState.IsAiming ? 0.28f : 1f;
-        Vector3 targetOffset = new(
-            Mathf.Sin(_phase * 2f) * amplitude * 0.35f,
-            0f,
-            Mathf.Sin(_phase) * amplitude * 0.55f + InjuryHandlingSystem.LegBias * 1.2f * movementBlend);
-        _cameraOffset = Vector3.Lerp(_cameraOffset, targetOffset * adsScale, 1f - Mathf.Exp(-10f * dt));
-    }
-
-    public static Vector3 ModifyCamera(Vector3 rotation)
-    {
-        return rotation + _cameraOffset;
     }
 
     public static void Reset()
@@ -82,7 +65,6 @@ internal static class LocomotionGaitSystem
         _weaponFollow = 1f;
         _momentum = 1f;
         _phase = 0f;
-        _cameraOffset = Vector3.zero;
     }
 
     private static ELocomotionGait ResolveGait(Player player)

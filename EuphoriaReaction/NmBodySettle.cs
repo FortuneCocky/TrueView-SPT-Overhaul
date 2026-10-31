@@ -64,7 +64,7 @@ internal partial class NmBody
     }
 
     /// His standing COM height: the takeover height, scaled up if he was taken over crouched or prone.
-    private float StandComH => _startPose == StartPose.Stand ? _comH0 : _startPose == StartPose.Crouch ? _comH0 / 0.68f : 0.95f;
+    private float StandComH => _startPose == StartPose.Stand ? _comH0 : _startPose == StartPose.Crouch ? _comH0 / 0.68f : _startPose == StartPose.DeepCrouch ? _comH0 / 0.5f : 0.95f;
 
     /// Mean knee bend (deg) from the doll's hip, knee and ankle joints.
     private float KneeBend()
@@ -128,11 +128,12 @@ internal partial class NmBody
         switch (now)
         {
             case Settle.Stand:
-                Send("stayUpright", ("start", true), ("stiffness", Tune.Upright * 2f));
-                ok = BeginMatch(StartPose.Stand, DollFacing());
+                if (RecoverStance() != StartPose.Prone) // too hurt to stay up: no pull upright, he's going down
+                    Send("stayUpright", ("start", true), ("stiffness", Tune.Upright * 2f));
+                ok = RecoverOnFeet(false, h);
                 break;
             case Settle.Crouch:
-                ok = BeginMatch(StartPose.Crouch, DollFacing());
+                ok = RecoverOnFeet(true, h);
                 break;
             default: // lying: a get-up, or prone when face down and badly hurt (GetUp)
                 ok = HandBackFromGround();

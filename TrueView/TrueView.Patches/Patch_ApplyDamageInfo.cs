@@ -39,6 +39,6 @@ internal class Patch_ApplyDamageInfo : ModulePatch
 		Vector3 direction = info.Field("Direction").GetValue<Vector3>();
 		EBodyPart part = (EBodyPart)__args[1];
 		AdrenalineSystem.OnHit();
-		HeadAttachSystem.OnHitTaken(part, direction, damage, __instance);
+		BodyCamSystem.OnHitTaken(part, direction, damage, __instance);
 	}
 }

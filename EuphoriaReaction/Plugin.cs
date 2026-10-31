@@ -34,7 +34,7 @@ public partial class EuphoriaPlugin : BaseUnityPlugin
     public ConfigEntry<bool> AiHitsToo { get; private set; }
     public ConfigEntry<float> Duration { get; private set; }
     public ConfigEntry<bool> AliveFalls { get; private set; }
-    public ConfigEntry<float> DownTime { get; private set; }
+    public ConfigEntry<BalancePreset> Balance { get; private set; }
     public ConfigEntry<bool> DeathEnabled { get; private set; }
     public ConfigEntry<float> DeathStruggle { get; private set; }
     public ConfigEntry<float> AgonyChance { get; private set; }
@@ -76,6 +76,11 @@ public partial class EuphoriaPlugin : BaseUnityPlugin
     public ConfigEntry<bool> CapturePoses { get; private set; }
     public ConfigEntry<bool> BlockFire { get; private set; }
     public ConfigEntry<float> AimBackChance { get; private set; }
+    public ConfigEntry<bool> FallMotions { get; private set; }
+    public ConfigEntry<StumbleLength> StumbleLen { get; private set; }
+    public ConfigEntry<float> StumbleMin { get; private set; }
+    public ConfigEntry<float> StumbleMax { get; private set; }
+    public ConfigEntry<float> HurtBelowHp { get; private set; }
     public ConfigEntry<float> AimBackDuration { get; private set; }
     public ConfigEntry<float> AimBackCone { get; private set; }
     public ConfigEntry<bool> BossGate { get; private set; }
@@ -100,15 +105,18 @@ public partial class EuphoriaPlugin : BaseUnityPlugin
         Chance = Config.Bind("1. Hit Reactions", "Reaction chance", 0.9f, new ConfigDescription("Chance a non-lethal hit triggers a reaction.", new AcceptableValueRange<float>(0f, 1f)));
         MaxDistance = Config.Bind("1. Hit Reactions", "Max distance (m)", 80, new ConfigDescription("Reactions only trigger within this range of the shooter.", new AcceptableValueRange<int>(5, 300)));
         AiHitsToo = Config.Bind("1. Hit Reactions", "Allow AI-caused reactions", true, "When off, only your hits trigger reactions.");
-        Duration = Config.Bind("1. Hit Reactions", "Reaction duration (s)", 8f, new ConfigDescription("How long physics owns the body before animation takes back over.", new AcceptableValueRange<float>(2f, 20f)));
+        Duration = Config.Bind("1. Hit Reactions", "Reaction duration (s)", 8f, new ConfigDescription("How long physics owns the body before animation takes back over. Stumbles end by Stumble length; this only limits reactions with no stumble clock (mid-air).", new AcceptableValueRange<float>(2f, 20f)));
         AliveFalls = Config.Bind("1. Hit Reactions", "Alive bots can fall", true, "On: heavy hits/leg shots can knock a living bot down (he stays down, then rises). Off: stumble/balance only.");
-        DownTime = Config.Bind("1. Hit Reactions", "Time down after a fall (s)", 3f, new ConfigDescription("How long a knocked-down bot stays on the ground before rising.", new AcceptableValueRange<float>(1f, 10f)));
+        Balance = Config.Bind("1. Hit Reactions", "Balance preset", BalancePreset.Engine,
+            "How bots fight to stay up when shot. Natural: tuned offline for lifelike staggers and falls. Engine: the physics engine's own tuning. "
+            + "Tough: stiffer, more catch steps, rarely falls. Classic: big, loose staggers, falls more. "
+            + "Custom: your own balance.txt next to the mod (same format as the files in presets/).");
         DeathEnabled = Config.Bind("2. Death", "Death struggle", true, "On a lethal hit Euphoria plays his death to the end, then SPT's corpse ragdoll takes over (he can't be looted before). Off: SPT's ragdoll straight away.");
         AgonyChance = Config.Bind("2. Death", "Agony chance", 0.25f, new ConfigDescription("Chance a lethal torso hit becomes the long agony (stagger, collapse, writhe on the ground) instead of the death fall (the hit reaction carries him down limp, physical until he settles). Head shots always fall, instantly limp; arm and leg hits are 1.6x as likely to be agony.", new AcceptableValueRange<float>(0f, 1f)));
         DeathStruggle = Config.Bind("2. Death", "Death struggle length (s)", 10f, new ConfigDescription("How long the agony lasts before SPT's ragdoll takes over. (A death fall ends when the body settles, within a few seconds.)", new AcceptableValueRange<float>(3f, 20f)));
 
         FallenPose = Config.Bind("3. Get up", "Hand back in SPT pose", true, "After a fall the bot gets up with a get-up animation (from his belly, his back or his side). Only face down and badly hurt (below) does he stay down in prone. Off: a plain blend back to his animation.");
-        ProneBelowHp = Config.Bind("3. Get up", "Stay prone below HP", 0.35f, new ConfigDescription("Face down after a fall with less than this share of his total HP left, he stays down in prone instead of getting up. 0 = always gets up.", new AcceptableValueRange<float>(0f, 1f)));
+        ProneBelowHp = Config.Bind("3. Get up", "Stay prone below HP", 0.35f, new ConfigDescription("Recovering with less than this share of his total HP left, he stays down in prone (any way he lies). 0 = always gets up.", new AcceptableValueRange<float>(0f, 1f)));
         PhysGetUp = Config.Bind("3. Get up", "Physical get-up", true, "The get-up plays through the physics body instead of over it: the clip is what its muscles aim for, its pelvis and chest are helped up, and hands and knees push on the real floor, so he rises with weight and settles instead of moving like a canned animation. A hit while he rises knocks him back into the reaction. Off = the clip alone.");
         GetUpPhysMix = Config.Bind("3. Get up", "Get-up physics mix", 0.5f, new ConfigDescription("How much of what you see is the physics body (1) versus the clip (0) while he gets up. The clip takes over at the end, but what you see never strays more than a hand's width from the physics body.", new AcceptableValueRange<float>(0f, 1f)));
         GetUpAssist = Config.Bind("3. Get up", "Get-up assist", 0.6f, new ConfigDescription("How hard the physics body is helped to where the clip has it (pelvis and chest most, the limbs less, more for a part that has fallen behind). Lower: heavier, more physical, but he may not make it up (the clip then hands him back anyway). Higher: follows the clip closely.", new AcceptableValueRange<float>(0f, 1.5f)));
@@ -141,6 +149,11 @@ public partial class EuphoriaPlugin : BaseUnityPlugin
         WoundGrab = Config.Bind("5. Stumble behaviour", "Grab wounds", false, "A hit bot reaches for and holds the wound with his free hand. Off for now.");
         CapturePoses = Config.Bind("9. Debug (advanced)", "Capture lying poses", true, "Every time a downed bot settles on the ground, his physics pose is saved to lying_poses.jsonl in the plugin folder (start poses for generating get-up animations).");
         BlockFire = Config.Bind("5. Stumble behaviour", "Block shooting during Euphoria", true, "A bot cannot fire while Euphoria owns him, while he is down, getting up, or blending back.");
+        StumbleLen = Config.Bind("5. Stumble behaviour", "Stumble length", StumbleLength.Natural, "How long a stumble may last. Short 0.4-1.5 s, Natural 0.8-3 s, Long 1.5-5 s, Custom uses the two sliders below. He stumbles at least the shorter time; steady after it he recovers, still not steady at the longer time he goes down.");
+        StumbleMin = Config.Bind("5. Stumble behaviour", "Stumble min (s)", 0.8f, new ConfigDescription("Custom stumble length: the least time he stumbles before he may recover.", new AcceptableValueRange<float>(0.1f, 5f)));
+        StumbleMax = Config.Bind("5. Stumble behaviour", "Stumble max (s)", 3f, new ConfigDescription("Custom stumble length: still not steady after this long, he goes down.", new AcceptableValueRange<float>(0.5f, 12f)));
+        HurtBelowHp = Config.Bind("5. Stumble behaviour", "Hurt below HP", 0.65f, new ConfigDescription("Recovering with less than this share of his HP, he comes back one pose lower (stand to crouch, crouch to deep crouch). Below Stay prone below HP he recovers prone.", new AcceptableValueRange<float>(0f, 1f)));
+        FallMotions = Config.Bind("5. Stumble behaviour", "Fall reactions by direction", true, "On: going over face first his arms go out ahead to catch the floor; going over backwards they wheel for a moment and then reach back behind him; sideways the arm on the low side goes out. Off: the same catch whichever way he falls.");
         AimBackChance = Config.Bind("5. Stumble behaviour", "Aim-back chance", 0.3f, new ConfigDescription("Chance a stumbling bot tries to aim the gun back at whoever shot him (one-handed) and fire a few shots.", new AcceptableValueRange<float>(0f, 1f)));
         AimBackDuration = Config.Bind("5. Stumble behaviour", "Aim-back window (s)", 2.5f, new ConfigDescription("How long after a hit the bot may try to shoot back, if he is still on his feet.", new AcceptableValueRange<float>(0.5f, 6f)));
         AimBackCone = Config.Bind("5. Stumble behaviour", "Aim-back cone (deg)", 40f, new ConfigDescription("A shot only goes off when the gun points within this angle of the shooter.", new AcceptableValueRange<float>(5f, 90f)));
@@ -177,6 +190,8 @@ public partial class EuphoriaPlugin : BaseUnityPlugin
         try
         {
             NmBody.Init(dir);
+            NmBody.ApplyBalance(dir, Balance.Value);
+            Balance.SettingChanged += (_, _) => NmBody.ApplyBalance(dir, Balance.Value);
         }
         catch (System.Exception e)
         {
@@ -214,3 +229,6 @@ internal sealed class ConfigurationManagerAttributes
     public bool? IsAdvanced;
     public int? Order;
 }
+
+/// <summary>Behaviour tuning the physics engine starts each shot and balance from.</summary>
+public enum BalancePreset { Engine, Natural, Tough, Classic, Custom }

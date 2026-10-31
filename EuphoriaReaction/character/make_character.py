@@ -127,8 +127,10 @@ FOOT_BOX = [0.05, 0.035, 0.125]  # half extents: across, up, heel-toe
 # Muscles: (stiffness, damping, strength, max torque swing, max torque twist), ours.
 LEG, SPINE, NECK, ARM, END = (0.5, 22.0, 120.0, 350.0, 350.0), (0.5, 20.0, 100.0, 300.0, 300.0), \
     (0.5, 12.0, 60.0, 150.0, 150.0), (0.5, 15.0, 80.0, 200.0, 200.0), (0.5, 10.0, 50.0, 120.0, 120.0)
-# tuning sweeps: scale every muscle's stiffness / damping / strength (env MC_STIFF, MC_DAMP, MC_STR)
-_k = lambda n: float(__import__("os").environ.get(n, "1"))
+# every muscle's stiffness / damping / strength scaled by these, found by tune_balance.py (env MC_STIFF, MC_DAMP,
+# MC_STR override them for tuning sweeps)
+MUSCLE_SCALE = {"MC_STIFF": 1.742, "MC_DAMP": 1.189, "MC_STR": 1.218}
+_k = lambda n: float(__import__("os").environ.get(n, MUSCLE_SCALE.get(n, 1)))
 LEG, SPINE, NECK, ARM, END = [(m[0] * _k("MC_STIFF"), m[1] * _k("MC_DAMP"), m[2] * _k("MC_STR"), m[3], m[4])
                               for m in (LEG, SPINE, NECK, ARM, END)]
 

@@ -42,6 +42,14 @@ internal static class HandlingManager
         {
             return;
         }
+        TickSystems(player, dt);
+        // Last, after every input it reads has updated — and every frame, so
+        // free look, inventory or a disabled mod let the camera settle back.
+        BodyCamSystem.Tick(player, dt);
+    }
+
+    private static void TickSystems(Player player, float dt)
+    {
         if (player.MouseLookControl)
         {
             // Reset procedural state when entering free look so the camera
@@ -172,6 +180,7 @@ internal static class HandlingManager
             LocomotionGaitSystem.Tick(player, dt);
             TurnInPlaceSystem.Tick(player, dt);
             DynamicFovSystem.Tick(player, dt);
+            FlybySystem.Tick();
             AdrenalineSystem.Tick(player, dt);
             BreathingSystem.Tick(player, dt);
             SprintCancelSystem.Tick(player);
@@ -218,12 +227,12 @@ internal static class HandlingManager
         LocomotionGaitSystem.Reset();
         TurnInPlaceSystem.Reset();
         DynamicFovSystem.Reset();
+        FlybySystem.Reset();
         AdrenalineSystem.Reset();
         BreathingSystem.Reset();
         InjuryHandlingSystem.Reset();
         MotionTracker.Reset(player);
         FluidMovementSystem.Reset();
-        HeadAttachSystem.Reset();
         if (player != null && player.ProceduralWeaponAnimation != null)
         {
             player.ProceduralWeaponAnimation.UpdateWeaponVariables();

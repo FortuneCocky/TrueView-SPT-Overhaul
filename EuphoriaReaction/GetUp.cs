@@ -427,11 +427,10 @@ internal partial class NmBody
     private bool HandBackFromGround()
     {
         bool faceDown = LyingFaceDown(out Vector3 hd);
-        float hp = StumbleEngine.HpFraction(_p);
-        float below = EuphoriaPlugin.Instance?.ProneBelowHp.Value ?? 0.35f;
-        if (faceDown && hp <= below)
+        if (RecoverStance() == StartPose.Prone) // badly hurt: prone, whichever way he lies (NmBodyPhase)
         {
-            EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} face down at {hp:P0} HP - stays down in prone");
+            EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} {(faceDown ? "face down" : "on his back")} at {StumbleEngine.HpFraction(_p):P0} HP - stays down in prone");
+            if (!faceDown && BeginRoll()) return true; // onto his front first, then the prone match (NmBodyRoll)
             if (BeginMatch(StartPose.Prone, hd)) return true;
             if (HandOffProne()) { _blendDur = GetUpBlend; Release(); return true; }
         }
@@ -520,6 +519,7 @@ internal partial class NmBody
         _blending = false;
         _getUp = clip;
         _guRoll = roll;
+        WarpReset(); // into a crouch: the rise bends into it (NmBodyGetUpWarp)
         _guF = Quaternion.Euler(0f, (azB - azC) * Mathf.Rad2Deg, 0f);
         _guScale = Mathf.Max(0.8f, (_standPelvisY - _floorY) / GetUpLibrary.RefPelvisY);
         _guPelvisStart = _blendPelvis;
@@ -627,6 +627,7 @@ internal partial class NmBody
             if (k == 0) _bones[0].SetPositionAndRotation(Vector3.Lerp(_blendPelvis, pelvisTarget, w), q);
             else _bones[k].rotation = q;
         }
+        WarpTail(fr, last, clip);
         GroundClamp();
         // the arms as the clip posed them, put back after the game's weapon IK (HoldGunLate)
         for (int k = 13; k < Parts; k++)
@@ -645,13 +646,11 @@ internal partial class NmBody
     private void FinishGetUp()
     {
         _armWritten = false;
-        for (int k = 0; k < Parts; k++)
-            if (_bones[k] != null) _blendRot[k] = _bones[k].rotation;
-        _blendPelvis = _bones[0].position;
-        _blendStart = Time.time;
+        CaptureHandBack(); // the clip's last pose and its speed: the spring carries it into the stance (NmBodyHandBack)
         _blendDur = 0.5f;
         _getUp = null;
         _blending = true;
+        SetPhase(Phase.None, "handed back");
         if (_p != null && _speedLimitApplied)
         {
             try { _p.RemoveStateSpeedLimit(Player.ESpeedLimit.Shot); } catch { }
@@ -668,9 +667,11 @@ internal partial class NmBody
             EuphoriaPlugin.Log($"Delirium: rolled onto his front - back to animation (prone{(taken ? "" : ", still settling")})");
             return;
         }
-        // the clip ends in his own standing pose: hand back standing
-        ApplyStance(StartPose.Stand);
-        EuphoriaPlugin.Log("Delirium: get-up finished - back to animation (stand)");
+        // the clip ends standing: handed back into his recover stance, a crouch sinking in over a longer blend
+        StartPose to = _recoverTarget == StartPose.Prone ? StartPose.Stand : _recoverTarget;
+        ApplyStance(to);
+        if (to != StartPose.Stand) _blendDur = _guWarpAt > 0f ? 0.5f : 0.8f; // already in the crouch when warped
+        EuphoriaPlugin.Log($"Delirium: get-up finished - back to animation ({to.ToString().ToLowerInvariant()})");
     }
 }
 

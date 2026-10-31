@@ -1,0 +1,24 @@
+; Euphoria Reaction balance preset: Tough
+; Our own tuning, set against the Delirium engine's defaults (noted after each value).
+; Bots fight harder to stay up: stiffer, more catch steps, less lean and spin from a hit.
+
+NMShot_Standing * {
+  shotMaxSteps            8      ; engine 6: more catch steps before he gives up
+  shotBodyStiffness       15.5   ; engine 13.5
+  shotLooseness           0.7    ; engine 1.0: less floppy
+  shotUprightStiffness    5.0    ; engine 3.0: pulls himself upright harder
+  shotLeanAmount          0.2    ; engine 0.3: leans less into the hit
+  shockSpinMin            25     ; engine 40: less twist from the hit
+  shockSpinMax            50     ; engine 80
+}
+
+NMShot_IsMoving * {
+  balanceBodyStiffness    14.0   ; engine 12
+  balanceMaxSteps         5      ; engine 3
+  balanceLeanAmount       0.3    ; engine 0.4
+}
+
+NMBalance * {
+  balanceStiffness        11.0   ; engine 9
+  balanceDamping          0.8    ; engine 0.7
+}

@@ -10,7 +10,7 @@ namespace EuphoriaReaction;
 /// reaction starts.
 ///
 /// Now the last two steps' part transforms and joint pivots are kept, and while LateUpdate poses the bones
-/// everything that reads the doll (Part, PartRot, DevJoint) returns the state between them, at the fraction
+/// everything that reads the doll (Part, PartRot, Joint) returns the state between them, at the fraction
 /// of the step that has passed since the last one. The pose shown trails the simulation by under one step.
 /// </summary>
 internal partial class NmBody
@@ -70,9 +70,10 @@ internal partial class NmBody
 
     private void LateUpdate()
     {
+        long pf = PerfNow();
         ViewOn();
-        try { LateUpdateCore(); }
-        finally { _view = false; }
+        try { LateUpdateCore(); PoseSnapshot(); }
+        finally { _view = false; PerfFrame(pf); }
     }
 
     private bool ViewPart(int k, out Vector3 pos, out Quaternion rot)

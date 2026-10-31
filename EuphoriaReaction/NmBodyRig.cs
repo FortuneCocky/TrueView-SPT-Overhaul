@@ -270,13 +270,13 @@ internal partial class NmBody
             note = _legRefConfirmed ? "agrees" : "agrees - reference confirmed";
             if (!_legRefConfirmed) SaveLegReference(_legRef, true);
         }
-        else if (_legCandidate != null && LegRelOff(r, _legCandidate) <= LegRefAgree)
+        else if (_legCandidate != null && _legCandidateBot != _p.ProfileId && LegRelOff(r, _legCandidate) <= LegRefAgree)
         {
             SaveLegReference(r, true);
             _legCandidate = null;
             note = "two clean bots agree against it - reference replaced";
         }
-        else { _legCandidate = r; note = "disagrees - kept as a candidate"; }
+        else { _legCandidate = r; _legCandidateBot = _p.ProfileId; note = "disagrees - kept as a candidate"; }
         EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} standing - leg rest {(vsRef >= 0f ? $"{vsRef:F0} deg" : "n/a")} from the {(_legRefConfirmed ? "confirmed" : "unconfirmed")} reference: {note}");
         if (!clean) SnapToReference(rest, "standing, corrected outfit");
     }
@@ -304,6 +304,7 @@ internal partial class NmBody
     private const float StandingRollMax = 45f; // deg: a standing leg bone's roll against its rest past this is the outfit mesh's
     private static bool _legRefConfirmed;
     private static Quaternion[] _legCandidate;
+    private static string _legCandidateBot; // the candidate's bot: the same bot taken over twice is not a second opinion
 
     /// The largest angle between two sets of leg rest relations (leg bones only).
     private static float LegRelOff(Quaternion[] a, Quaternion[] b)

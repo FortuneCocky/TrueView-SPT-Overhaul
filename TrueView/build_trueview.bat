@@ -14,4 +14,6 @@ if errorlevel 1 (echo DEPLOY FAILED - is the game running? >> "%LOG%" & exit /b 
 if not exist "J:\Games\SPT 4.1.6\BepInEx\plugins\TrueView\audio" mkdir "J:\Games\SPT 4.1.6\BepInEx\plugins\TrueView\audio"
 copy /y "audio\*.wav" "J:\Games\SPT 4.1.6\BepInEx\plugins\TrueView\audio\" >> "%LOG%" 2>&1
 if errorlevel 1 (echo AUDIO COPY FAILED >> "%LOG%" & exit /b 1)
+rem Local-only sounds (licensed, not in git or releases): the flyby whiz takes.
+if exist "audio_local\*.wav" copy /y "audio_local\*.wav" "J:\Games\SPT 4.1.6\BepInEx\plugins\TrueView\audio\" >> "%LOG%" 2>&1
 echo BUILD+DEPLOY OK >> "%LOG%"

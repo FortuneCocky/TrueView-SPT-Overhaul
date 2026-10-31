@@ -47,11 +47,20 @@ public class BloodFXPlugin : BaseUnityPlugin
     public ConfigEntry<float> MaxDistance { get; private set; }
     public ConfigEntry<float> DecalLifetime { get; private set; }
     public ConfigEntry<bool> WoundDrips { get; private set; }
+    public ConfigEntry<bool> BleedDrips { get; private set; }
+    public ConfigEntry<bool> BrainMatter { get; private set; }
+    public ConfigEntry<bool> WallSplatter { get; private set; }
+    public ConfigEntry<bool> HeadDismember { get; private set; }
+    public ConfigEntry<float> DismemberChance { get; private set; }
+    public ConfigEntry<float> DismemberMinDamage { get; private set; }
+    public ConfigEntry<float> HalfFaceChance { get; private set; }
+    public ConfigEntry<float> WholeHeadDamage { get; private set; }
     public ConfigEntry<bool> DeathPools { get; private set; }
     public ConfigEntry<bool> PlayerHits { get; private set; }
     public ConfigEntry<float> Brightness { get; private set; }
     public ConfigEntry<bool> Streams { get; private set; }
     public ConfigEntry<int> MaxStreams { get; private set; }
+    public ConfigEntry<int> TargetFps { get; private set; }
     public ConfigEntry<bool> DebugLog { get; private set; }
     public ConfigEntry<bool> WoundDecals { get; private set; }
     public ConfigEntry<bool> ArmorMarks { get; private set; }
@@ -76,6 +85,25 @@ public class BloodFXPlugin : BaseUnityPlugin
         DecalLifetime = Config.Bind("2. Caps", "DecalLifetime", 120f,
             new ConfigDescription("Seconds a splat stays before fading (pools stay twice as long).", new AcceptableValueRange<float>(10f, 1200f)));
         WoundDrips = Config.Bind("3. Effects", "WoundDrips", true, "Wounded bots drip blood for a few seconds after a hit.");
+        BrainMatter = Config.Bind("3. Effects", "BrainMatter", true,
+            "Headshots throw out 3D chunks of brain matter and skull that fall, tumble and splat where they land.");
+        WallSplatter = Config.Bind("3. Effects", "HeadshotWallSplatter", true,
+            "A headshot next to a wall paints it: a wide burst of drops, a dense dark core, and drips that run down.");
+        HeadDismember = Config.Bind("3. Effects", "HeadDismember", true,
+            "Only on a killing headshot: the head is blown apart, wholly or the exit half, and whatever is worn on it flies off (visual only).");
+        DismemberChance = Config.Bind("3. Effects", "DismemberChance", 0.75f,
+            new ConfigDescription("Chance a qualifying headshot takes the head off.", new AcceptableValueRange<float>(0f, 1f)));
+        DismemberMinDamage = Config.Bind("3. Effects", "DismemberMinDamage", 40f,
+            new ConfigDescription("Least damage a round must do to take the head off (pistols ~40-60, rifles 50-90, buckshot pellets ~25-40).",
+                new AcceptableValueRange<float>(0f, 200f)));
+        HalfFaceChance = Config.Bind("3. Effects", "HalfFaceChance", 0.6f,
+            new ConfigDescription("Of the heads that come apart, how many keep the entry side of the face (the rest go whole).",
+                new AcceptableValueRange<float>(0f, 1f)));
+        WholeHeadDamage = Config.Bind("3. Effects", "WholeHeadDamage", 90f,
+            new ConfigDescription("Rounds doing this much damage or more always take the whole head.", new AcceptableValueRange<float>(0f, 300f)));
+        BleedDrips = Config.Bind("3. Effects", "BleedDrips", true,
+            "Bleeding characters drip real drops from the wound (they fall, splash and trail behind them) " +
+            "instead of EFT's flat bleeding stains.");
         DeathPools = Config.Bind("3. Effects", "DeathPools", true, "A pool slowly spreads under dead bodies.");
         PlayerHits = Config.Bind("3. Effects", "PlayerHits", false, "Also spawn blood when you are hit (can put mist in your view).");
         Brightness = Config.Bind("3. Effects", "Brightness", 1f,
@@ -84,6 +112,9 @@ public class BloodFXPlugin : BaseUnityPlugin
             "3D liquid spurts (jets, bursts, arterial pumping, gushes) as well as the droplet spray.");
         MaxStreams = Config.Bind("2. Caps", "MaxStreams", 0,
             new ConfigDescription("Hard cap on live 3D blood streams, oldest is reused (0 = quality default).", new AcceptableValueRange<int>(0, 512)));
+        TargetFps = Config.Bind("2. Caps", "TargetFps", 0,
+            new ConfigDescription("Blood effects scale down when the frame rate drops below this (0 = below your usual frame rate).",
+                new AcceptableValueRange<int>(0, 240)));
         WoundDecals = Config.Bind("3. Effects", "WoundDecals", true,
             "Bullet wounds stick to the body where it was hit (dark hole, torn ring, a trickle running down).");
         ArmorMarks = Config.Bind("3. Effects", "ArmorMarks", true,
@@ -98,6 +129,7 @@ public class BloodFXPlugin : BaseUnityPlugin
             "Every 10 s with activity, log how many hits were seen, spawned and why the rest were skipped.");
 
         new BloodHitPatch().Enable();
+        new BleedingPatch().Enable();
 
         EnsureManager();
         Log.LogInfo("BloodFX loaded");

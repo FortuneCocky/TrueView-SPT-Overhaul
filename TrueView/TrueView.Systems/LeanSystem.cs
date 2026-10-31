@@ -28,18 +28,9 @@ internal static class LeanSystem
 		float num = 0f;
 		if (HandlingConfig.LeanEnabled.Value && HandlingState.HasWeapon && player != null)
 		{
+			// Turns only: the strafe lean is MomentumSystem's, built from how you actually move.
 			float turn = Mathf.Clamp(MotionTracker.YawRateSlow / 180f, -1.5f, 1.5f);
-
-			float yaw = player.Rotation.x * Mathf.Deg2Rad;
-			float sin = Mathf.Sin(yaw);
-			float cos = Mathf.Cos(yaw);
-			float localRight = player.Velocity.x * cos - player.Velocity.z * sin;
-
-			float inputLateral = MotionTracker.InputDirection.x;
-			float movementLateral = Mathf.Clamp(localRight * 0.08f, -1.5f, 1.5f) * MotionTracker.NormalizedSpeed;
-			float lateral = inputLateral * 0.6f + movementLateral;
-
-			num = Mathf.Clamp(turn + lateral, -1.5f, 1.5f) * Mathf.Clamp01(HandlingConfig.LeanMultiplier.Value);
+			num = turn * Mathf.Clamp01(HandlingConfig.LeanMultiplier.Value);
 			if (HandlingState.IsAiming)
 			{
 				num *= 0.55f;

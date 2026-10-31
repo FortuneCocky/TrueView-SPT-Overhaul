@@ -32,6 +32,8 @@ internal partial class NmBody
 
     /// LateUpdate while matching, after the gun has been placed: the left palm back onto its grip.
     private bool _matchFromGround;
+    private float _reachCut; // when the reach for the gun was called off this match (0 = it wasn't)
+    private const float ReachLetGo = 0.15f; // s for the hand to come off the reach
 
     private void ReachSupportGrip()
     {
@@ -39,7 +41,14 @@ internal partial class NmBody
         // from the ground (lying, prone, a get-up's end) the hand isn't put back on the gun: reaching for it
         // through a body turning over threw the arm about; the animation takes the hand back after the hand-back
         if (_matchFromGround) return;
+        // going over again while recovering: the hand stops reaching for the gun and the doll has it back
+        if (_reachCut == 0f && GoingDown)
+        {
+            _reachCut = Time.time;
+            EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} going down while recovering - the hand stops reaching for the gun");
+        }
         float w = Mathf.SmoothStep(0f, 1f, (Time.time - _matchStart) / SupportReach);
+        if (_reachCut > 0f) w *= 1f - Mathf.Clamp01((Time.time - _reachCut) / ReachLetGo);
         if (w <= 0.001f) return;
         Vector3 target = _gun.position + _gun.rotation * _supportLocal;
         LeftArmIK(target, w);

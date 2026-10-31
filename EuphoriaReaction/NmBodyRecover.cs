@@ -52,7 +52,9 @@ internal partial class NmBody
     /// Update, once per stumble: true when he caught himself (the stance match took over).
     private bool StumbleSaveTick(float h)
     {
-        if (_saveRolled || _downSince > 0f) return false;
+        // already put down (the stumble's max, or the catch already sent): his balance is gone, and a stance match
+        // pulling a falling body upright launched him into whatever was near (7-12 m/s, flips)
+        if (_saveRolled || _downSince > 0f || _catchFallSent) return false;
         if (_startPose == StartPose.Prone)
         {
             // shoved while prone: he settles back into prone instead of flailing on
@@ -75,7 +77,12 @@ internal partial class NmBody
             EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} goes down: {why} (lean {tilt:F0} deg, COM {h:F2}m)");
             return false;
         }
-        StartPose to = _crouchStumble || h < ComScaled(0.65f, 0.7f) ? StartPose.Crouch : StartPose.Stand; // on his feet: standing
+        StartPose to = RecoverStance(h < ComScaled(0.65f, 0.7f)); // by his health and how low he is (NmBodyPhase)
+        if (to == StartPose.Prone)
+        {
+            EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} too hurt to catch himself ({StumbleEngine.HpFraction(_p):P0} HP)");
+            return false;
+        }
         // still upright: straight back to his feet. Once the engine calls a fall its balancer is gone for good, so a
         // stance match on a man barely leaning had nothing holding him up: he "caught himself" at 4 deg, then
         // collapsed in the match, lay 5 s and got up

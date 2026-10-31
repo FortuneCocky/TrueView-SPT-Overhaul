@@ -37,7 +37,7 @@ internal sealed class BloodStreams
     {
         public Spec S;
         public float Born, Phase, Flat, Twist, LastRb;
-        public int Seed, Cycle;
+        public int Seed, Cycle, HistAt;
         public Vector3 LastBulb;
         public bool Live;
     }
@@ -57,6 +57,10 @@ internal sealed class BloodStreams
     private Color32[] _c;
     private Vector3[] _ring;
     private float[] _rad;
+    // anchored streams: where the nozzle was over the emission window, so each element leaves from where
+    // the wound was when it was emitted and keeps the body's velocity, instead of the whole rope moving with it
+    private const int HistN = 24;
+    private Vector3[] _hist;
     private int _rings, _next, _live;
     private bool _wasDrawing;
 
@@ -101,6 +105,7 @@ internal sealed class BloodStreams
         _c = new Color32[capacity * per];
         _ring = new Vector3[_rings];
         _rad = new float[_rings];
+        _hist = new Vector3[capacity * HistN];
         var tris = new int[capacity * (_rings - 1) * Sides * 6];
         int t = 0;
         for (int s = 0; s < capacity; s++)
@@ -148,11 +153,13 @@ internal sealed class BloodStreams
         _s[i].S = spec;
         _s[i].Born = now;
         _s[i].Phase = Random.value * 6.283f;
-        _s[i].Flat = Random.Range(0.35f, 0.7f);   // ribbon/sheet cross-section, not a pipe
+        _s[i].Flat = Random.Range(0.7f, 0.95f);   // slightly flattened, not a flat ribbon
         _s[i].Twist = Random.Range(-6f, 6f);
         _s[i].Seed = Random.Range(0, 100000);
         _s[i].Cycle = 0;
         _s[i].LastRb = 0f;
+        _s[i].HistAt = 0;
+        _hist[i * HistN] = spec.Origin;
         _s[i].Live = true;
         _renderer.enabled = true;
     }
@@ -191,7 +198,19 @@ internal sealed class BloodStreams
                 Collapse(i);
                 continue;
             }
-            if (sp.Anchor != null && age < sp.Emit) sp.Origin = sp.Anchor.TransformPoint(sp.AnchorLocal);
+            bool anchored = sp.Anchor != null && !sp.Drip;
+            float hdt = sp.Emit / (HistN - 1);
+            int hb = i * HistN;
+            if (sp.Anchor != null && age < sp.Emit)
+            {
+                sp.Origin = sp.Anchor.TransformPoint(sp.AnchorLocal);
+                if (anchored)
+                {
+                    int at = Mathf.Min(HistN - 1, (int)(age / hdt));
+                    for (int h = st.HistAt + 1; h <= at; h++) _hist[hb + h] = sp.Origin;
+                    st.HistAt = Mathf.Max(st.HistAt, at);
+                }
+            }
             bool attached = age < sp.Emit;
             float g = 9.81f * sp.Gravity;
 
@@ -205,7 +224,20 @@ internal sealed class BloodStreams
                 float speed = (1f - sp.Decay * tau / Mathf.Max(0.01f, sp.Emit)) *
                               (1f + sp.PulseDepth * Mathf.Sin(6.283f * sp.PulseFreq * tau + st.Phase));
                 speed = Mathf.Max(0.05f, speed);
-                Vector3 p = sp.Origin + sp.Velocity * (speed * a);
+                Vector3 o = sp.Origin, inherit = Vector3.zero;
+                if (anchored)
+                {
+                    // recorded samples up to HistAt, then the live nozzle for the newest stretch
+                    float hx = tau / hdt;
+                    int h0 = Mathf.Min((int)hx, st.HistAt);
+                    Vector3 a0 = _hist[hb + h0];
+                    Vector3 a1 = h0 < st.HistAt ? _hist[hb + h0 + 1] : sp.Origin;
+                    o = Vector3.Lerp(a0, a1, Mathf.Clamp01(hx - h0));
+                    if (h0 < st.HistAt) inherit = (a1 - a0) / hdt;
+                    else if (st.HistAt > 0) inherit = (a0 - _hist[hb + h0 - 1]) / hdt;
+                    inherit = Vector3.ClampMagnitude(inherit, 4f);
+                }
+                Vector3 p = o + (sp.Velocity * speed + inherit) * a;
                 p.y -= 0.5f * g * a * a;
                 // noise is keyed to the element (tau), so clumps and necks travel with the fluid
                 float clump = Noise(tau * 14f, st.Seed);
@@ -261,8 +293,8 @@ internal sealed class BloodStreams
                     float s = Mathf.Max(0f, Vector3.Dot(n, h));
                     s *= s; s *= s; s *= s; s *= s; s *= s; // ^32: small wet glint, not plastic
                     float shade = diff * (1f - 0.5f * fres);
-                    float spec = s * 0.35f * light;
-                    _c[b + k * Sides + j] = new Color(col.r * shade + spec, col.g * shade + spec * 0.45f, col.b * shade + spec * 0.45f, 1f);
+                    float spec = s * 0.35f;
+                    _c[b + k * Sides + j] = Wet.Shade(col, shade, spec * 2f);
                     min = Vector3.Min(min, v);
                     max = Vector3.Max(max, v);
                 }

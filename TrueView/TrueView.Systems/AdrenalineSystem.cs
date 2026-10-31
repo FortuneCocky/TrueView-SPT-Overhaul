@@ -64,6 +64,13 @@ internal static class AdrenalineSystem
         _level = Mathf.Clamp01(_level + spike);
     }
 
+    /// <summary>A round passed close by: 0 = at the edge of earshot (10 m), 1 = past your ear.</summary>
+    public static void OnFlyby(float closeness)
+    {
+        if (HandlingConfig.AdrenalineEnabled?.Value == true)
+            _level = Mathf.Clamp01(_level + Mathf.Lerp(0.08f, 0.3f, closeness));
+    }
+
     /// <summary>Called when the local player takes a hit — full spike.</summary>
     public static void OnHit()
     {

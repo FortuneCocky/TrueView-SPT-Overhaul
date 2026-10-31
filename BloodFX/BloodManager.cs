@@ -50,7 +50,7 @@ public class BloodManager : MonoBehaviour
 
     private const int PendingSlots = 192, WoundSlots = 24, PoolSlots = 32, PendingDropSlots = 768;
     private static readonly Color DropBase = new Color(0.5f, 0.03f, 0.025f, 1f);
-    private static readonly Color StreamBase = new Color(0.46f, 0.02f, 0.018f, 1f);
+    private static readonly Color StreamBase = new Color(0.34f, 0.014f, 0.012f, 1f); // the floor stains' tone (DecalBase)
     private static readonly Color DecalBase = new Color(0.36f, 0.015f, 0.012f, 0.95f);
     private static readonly Color PoolBase = new Color(0.26f, 0.008f, 0.008f, 0.94f);
 
@@ -66,6 +66,11 @@ public class BloodManager : MonoBehaviour
     private StuckDrops _stuck;
     private BloodPools _puddles, _splats;
     private BloodTrails _trails;
+    private BrainChunks _brains;
+    private HeadGib _heads;
+    private int _decapitations, _halfHeads;
+    // frame-time load: 1 = full effects, down to 0.3 when frames run slower than usual
+    private float _load = 1f, _fastDt, _slowDt;
     private readonly PendingDrop[] _pendingDrops = new PendingDrop[PendingDropSlots];
     private int _pendingDropNext;
     private static readonly Color WoundBase = new Color(0.55f, 0.03f, 0.025f, 1f);
@@ -119,6 +124,10 @@ public class BloodManager : MonoBehaviour
         _splats = new BloodPools(transform, liquidMat, SplatCapacity(), _mask);
         _trails = new BloodTrails(transform, liquidMat, TrailCapacity(), _mask);
         _streams = new BloodStreams(transform, liquidMat, _tier.Streams, _tier.Rings);
+        _brains = new BrainChunks(transform, liquidMat, BrainCapacity(), _mask);
+        _brains.Landed = OnChunkLanded;
+        _heads = new HeadGib(transform, liquidMat, _mask);
+        _heads.Landed = OnChunkLanded;
         ApplyTier();
         _onTier = (s, e) => { if (this != null) ApplyTier(); };
         _onEnabled = (s, e) => { if (this != null && !_cfg.Enabled.Value) ClearAll(); };
@@ -213,7 +222,7 @@ public class BloodManager : MonoBehaviour
             coll.enabled = true;
             coll.type = ParticleSystemCollisionType.World;
             coll.mode = ParticleSystemCollisionMode.Collision3D;
-            coll.quality = ParticleSystemCollisionQuality.High;
+            coll.quality = kind == 2 ? ParticleSystemCollisionQuality.High : ParticleSystemCollisionQuality.Medium;
             coll.collidesWith = _mask;
             coll.lifetimeLoss = 1f;
             coll.bounce = 0f;
@@ -330,6 +339,7 @@ public class BloodManager : MonoBehaviour
         if (_puddles.Capacity != Mathf.Clamp(PuddleCapacity(), 4, 128)) _puddles.Resize(PuddleCapacity());
         if (_splats.Capacity != Mathf.Clamp(SplatCapacity(), 4, 128)) _splats.Resize(SplatCapacity());
         if (_trails.Capacity != Mathf.Clamp(TrailCapacity(), 4, 128)) _trails.Resize(TrailCapacity());
+        if (_brains.Capacity != Mathf.Clamp(BrainCapacity(), 16, 512)) _brains.Resize(BrainCapacity());
         if (_streams.Capacity != Mathf.Clamp(_tier.Streams, 4, 512) || _streams.Rings != _tier.Rings)
             _streams.Resize(_tier.Streams, _tier.Rings);
     }
@@ -347,6 +357,8 @@ public class BloodManager : MonoBehaviour
         _puddles.Clear();
         _splats.Clear();
         _trails.Clear();
+        _brains.Clear();
+        _heads.Clear();
         for (int i = 0; i < PendingDropSlots; i++) _pendingDrops[i].Active = false;
         _streams.Clear();
         for (int i = 0; i < PendingSlots; i++) _pending[i].Active = false;
@@ -354,6 +366,8 @@ public class BloodManager : MonoBehaviour
         _streams.ClearDetach();
         for (int i = 0; i < PoolSlots; i++) _pools[i].Active = false;
         _pooledBodies.Clear();
+        _wounds.Clear();
+        _bleedDripUntil.Clear();
     }
 
     // ---------------------------------------------------------------- hits
@@ -377,13 +391,15 @@ public class BloodManager : MonoBehaviour
         bool ballistic = (type & ballisticTypes) != 0;
         bool blast = (type & blastTypes) != 0;
         if (!ballistic && !blast) { _skipType++; return; }
+        if (di.HitCollider != null) RememberWound(victim, di.HitCollider.transform, di.HitPoint,
+            di.HitNormal.sqrMagnitude > 0.01f ? di.HitNormal : -di.Direction);
         bool melee = (type & EDamageType.Melee) != 0 && !blast;
 
         bool dead = victim.HealthController != null && !victim.HealthController.IsAlive;
         if (dead && _cfg.DeathPools.Value) QueuePool(victim);
 
         if (Time.frameCount != _frame) { _frame = Time.frameCount; _hitsThisFrame = 0; }
-        if (++_hitsThisFrame > _tier.HitsPerFrame) { _skipBudget++; return; } // shotgun storms: the rest are dropped
+        if (++_hitsThisFrame > Mathf.Max(1, Mathf.RoundToInt(_tier.HitsPerFrame * _load))) { _skipBudget++; return; } // shotgun storms: the rest are dropped
 
         Vector3 pt = di.HitPoint;
         Vector3 dir = di.Direction;
@@ -422,6 +438,11 @@ public class BloodManager : MonoBehaviour
             floorY = hit.point.y;
             floorN = hit.normal;
         }
+
+        // killing headshots only: a head that's still alive (helmet stop, graze) is never taken apart
+        if (head && ballistic && !melee && _cfg.HeadDismember.Value && dist <= maxDist && di.Damage >= _cfg.DismemberMinDamage.Value
+            && (dead || HeadGone(victim)) && !_heads.IsDone(victim) && Random.value < _cfg.DismemberChance.Value)
+            Decapitate(victim, ref di, dir, power, sizeScale, floorY, floorN, light, decalCol, now);
 
         if (particles)
         {
@@ -470,9 +491,10 @@ public class BloodManager : MonoBehaviour
         if (_cfg.WoundDecals.Value && di.HitCollider != null && dist <= maxDist)
         {
             Vector3 face = BodyFacing(ref di, dir);
-            float size = Mathf.Clamp(Random.Range(0.07f, 0.11f) * Mathf.Sqrt(power), 0.05f, 0.15f) * (blast ? 0.6f : 1f);
-            bool run = Random.value < 0.8f;
-            float runLen = size * Random.Range(1.3f, 2.6f) * Mathf.Clamp(power, 0.6f, 1.5f);
+            // a real entry wound: a ~1.5 cm hole in a dark ring, 3.5-6 cm across in all (fragments a bit smaller)
+            float size = Mathf.Clamp(Random.Range(0.035f, 0.05f) * Mathf.Sqrt(power), 0.03f, 0.06f) * (blast ? 0.75f : 1f);
+            bool run = Random.value < 0.45f;
+            float runLen = Mathf.Clamp(size * Random.Range(1.5f, 2.6f) * Mathf.Clamp(power, 0.7f, 1.3f), 0.05f, 0.12f);
             int woundCell = BloodTextures.WoundCell0 + Random.Range(0, BloodTextures.WoundCells);
             int runCell = BloodTextures.RunCell0 + Random.Range(0, BloodTextures.RunCells);
             if (!(_cfg.ConformMarks.Value && _marks.TryAdd(victim, di.HitCollider.transform, pt, dir, size, woundCell,
@@ -505,6 +527,8 @@ public class BloodManager : MonoBehaviour
         }
         if (head)
         {
+            if (_cfg.BrainMatter.Value) BrainBurst(pt, dir, power, scale, light, now);
+            if (_cfg.WallSplatter.Value) WallHeadSplatter(pt, dir, power, scale, floorY, light, now);
             Spawn(Spurt.HeadBurst, pt, dir, power, scale, floorY, floorN, light, decalCol, now, null);
             Spawn(Spurt.BackSpatter, pt, -dir, power, scale, floorY, floorN, light, decalCol, now, null);
             return;
@@ -512,8 +536,8 @@ public class BloodManager : MonoBehaviour
         Spawn(Random.value < 0.5f ? Spurt.ExitJet : Spurt.ExitBurst, pt, dir, power, scale, floorY, floorN, light, decalCol, now, null);
         if (Random.value < 0.4f) Spawn(Spurt.BackSpatter, pt, -dir, power, scale, floorY, floorN, light, decalCol, now, null);
         // the signature effect: a rope of blood pouring out of the wound for a few seconds
-        if (dead || Random.value < 0.45f) Spawn(Spurt.Pour, pt, dir, power, scale, floorY, floorN, light, decalCol, now, anchor);
-        if (dead && Random.value < 0.3f) Spawn(Spurt.Pour, pt, -dir, power, scale, floorY, floorN, light, decalCol, now, anchor);
+        if (Random.value < (dead ? 0.45f : 0.18f)) Spawn(Spurt.Pour, pt, dir, power, scale, floorY, floorN, light, decalCol, now, anchor);
+        if (dead && Random.value < 0.1f) Spawn(Spurt.Pour, pt, -dir, power, scale, floorY, floorN, light, decalCol, now, anchor);
         float r = Random.value;
         if (r < 0.1f + 0.08f * power) Spawn(Spurt.Arterial, pt, dir, power, scale, floorY, floorN, light, decalCol, now, anchor);
         else if (dead ? r < 0.45f : r < 0.25f) Spawn(Spurt.Gush, pt, dir, power, scale, floorY, floorN, light, decalCol, now, anchor);
@@ -573,8 +597,8 @@ public class BloodManager : MonoBehaviour
                 {
                     int m = Random.Range(3, 6);
                     for (int i = 0; i < m; i++)
-                        Stream(pt, Jitter(dir, 0.9f) * Random.Range(2f, 6f) * p, Random.Range(0.06f, 0.12f), 0.35f,
-                            Random.Range(0.01f, 0.02f) * scale, 0.5f, 0f, 0f, 1.8f, 1f, floorY, floorN, light, decalCol, now, null, i < 2);
+                        Stream(pt, Jitter(dir, 0.9f) * Random.Range(2f, 6f) * p, Random.Range(0.05f, 0.1f), 0.35f,
+                            Random.Range(0.008f, 0.014f) * scale, 0.5f, 0f, 0f, 1.8f, 1f, floorY, floorN, light, decalCol, now, null, i < 2);
                     break;
                 }
                 // long glossy ribbons forking out of the exit wound. Straight along the bullet they'd
@@ -597,14 +621,14 @@ public class BloodManager : MonoBehaviour
                 {
                     float o = i - (n - 1) * 0.5f;
                     Vector3 d = (baseDir + lift * (o * fork) + side * Random.Range(-0.05f, 0.05f)).normalized;
-                    Stream(pt, d * Random.Range(3.5f, 5.5f) * p, Random.Range(0.22f, 0.34f), 0.75f,
-                        Random.Range(0.02f, 0.03f) * scale, 0.55f, 0f, 0f, 0.6f, 0.7f, floorY, floorN, light, decalCol, now, null, i == 0);
+                    Stream(pt, d * Random.Range(3.2f, 5f) * p, Random.Range(0.14f, 0.22f), 0.6f,
+                        Random.Range(0.011f, 0.017f) * scale, 0.55f, 0f, 0f, 0.7f, 1f, floorY, floorN, light, decalCol, now, null, i == 0);
                 }
                 Color32 liquid = Tint(StreamBase, light, 1f);
-                int cloud = Mathf.RoundToInt(_tier.Droplets * 2f * power);
-                EmitSpray(pt, baseDir, cloud, 0.6f, 1.5f, 6f, liquid, scale * 1.2f, floorY);         // drops scattered around the ribbons
-                EmitSpray(pt, baseDir, cloud / 2, 0.9f, 0.8f, 3.5f, liquid, scale * 0.45f, floorY);  // fine spray
-                EmitSpray(pt, baseDir, 8 + _tier.Droplets / 4, 0.05f, 5.5f, 7.5f, liquid, scale, floorY); // leader drops out front
+                int cloud = Mathf.RoundToInt(_tier.Droplets * 1.2f * power);
+                EmitSpray(pt, baseDir, cloud, 0.6f, 1.5f, 6f, liquid, scale * 0.7f, floorY);         // drops scattered around the ribbons
+                EmitSpray(pt, baseDir, cloud / 2, 0.9f, 0.8f, 3.5f, liquid, scale * 0.3f, floorY);  // fine spray
+                EmitSpray(pt, baseDir, 5 + _tier.Droplets / 6, 0.05f, 5.5f, 7.5f, liquid, scale * 0.7f, floorY); // leader drops out front
                 break;
             }
             case Spurt.Fan:
@@ -630,8 +654,8 @@ public class BloodManager : MonoBehaviour
                 if (d.sqrMagnitude < 1e-3f) d = Random.insideUnitSphere;
                 d.y = 0f;
                 d = (d.normalized * 0.75f + Vector3.up * 0.1f + Random.insideUnitSphere * 0.15f).normalized;
-                Stream(pt, d * Random.Range(0.7f, 1.4f), Random.Range(1.6f, 3.2f), 0.9f,
-                    Random.Range(0.02f, 0.034f) * scale, 0.65f, Random.Range(1.1f, 1.6f), 0.22f, 0.35f, 1f, floorY, floorN, light, decalCol, now, anchor, true);
+                Stream(pt, d * Random.Range(0.7f, 1.4f), Random.Range(1.2f, 2.4f), 0.9f,
+                    Random.Range(0.011f, 0.018f) * scale, 0.65f, Random.Range(1.1f, 1.6f), 0.22f, 0.35f, 1f, floorY, floorN, light, decalCol, now, anchor, true);
                 break;
             }
             case Spurt.Dribble:
@@ -672,10 +696,13 @@ public class BloodManager : MonoBehaviour
                 float hs = flat.magnitude;
                 if (hs > 0.8f)
                 {
-                    // hit the ground moving: the blood drags out into a smear along the travel direction
-                    float len = Mathf.Clamp(radius * 20f * (1f + emit) * Mathf.Sqrt(hs), 0.25f, 1.2f);
-                    float width = Mathf.Clamp(radius * 3.5f * (1f + emit * 0.5f), 0.02f, 0.12f);
-                    Trail(land, floorN, flat / hs, len, width, now + tl, Mathf.Clamp(len / (hs * 0.6f), 0.3f, 1.6f), light);
+                    // hit the ground moving: sometimes the blood drags out into a smear along the travel direction
+                    if (Random.value < 0.35f)
+                    {
+                        float len = Mathf.Clamp(radius * 14f * (1f + emit) * Mathf.Sqrt(hs), 0.15f, 0.8f);
+                        float width = Mathf.Clamp(radius * 1.8f * (1f + emit * 0.3f), 0.012f, 0.055f);
+                        Trail(land, floorN, flat / hs, len, width, now + tl, Mathf.Clamp(len / (hs * 0.6f), 0.3f, 1.6f), light);
+                    }
                 }
                 else
                 {
@@ -689,7 +716,7 @@ public class BloodManager : MonoBehaviour
         _streams.Spawn(ref s, now);
 
         // thin strands peeling off the main flow
-        if (radius < 0.016f || emit < 0.15f) return;
+        if (radius < 0.016f || emit < 0.15f || _load < 0.7f) return;
         int strands = Random.Range(1, 3);
         for (int i = 0; i < strands; i++)
         {
@@ -711,7 +738,7 @@ public class BloodManager : MonoBehaviour
     {
         float p = Mathf.Sqrt(Mathf.Clamp(power, 0.3f, 2.5f));
         Color col = (Color)Tint(StreamBase, light, 1f);
-        int strands = Mathf.Clamp(_tier.Mist + 2, 3, 10);
+        int strands = Mathf.Max(2, Mathf.RoundToInt(Mathf.Clamp(_tier.Mist + 2, 3, 10) * _load));
         for (int i = 0; i < strands; i++)
         {
             var s = new BloodStreams.Spec
@@ -719,13 +746,225 @@ public class BloodManager : MonoBehaviour
                 Origin = pt, Velocity = Jitter(dir, 0.6f) * Random.Range(2.5f, 6f) * p,
                 Emit = Random.Range(0.03f, 0.07f), Life = Random.Range(0.12f, 0.2f),
                 Radius = Random.Range(0.003f, 0.007f) * scale, Decay = 0.5f, Breakup = Random.Range(1.8f, 2.4f),
-                Gravity = 0.6f, FloorY = floorY, Light = light, Col = col
+                Gravity = 1f, FloorY = floorY, Light = light, Col = col
             };
             _streams.Spawn(ref s, now);
         }
         Color32 c32 = Tint(StreamBase, light, 1f);
         EmitSpray(pt, dir, 4 + _tier.Mist, 0.35f, 0.8f, 2.2f, c32, scale * 1.3f, floorY);       // dense core
         EmitSpray(pt, dir, _tier.Droplets, 0.7f, 1.5f, 5.5f, c32, scale * 0.22f, floorY);      // fine droplets of the web
+    }
+
+    /// <summary>
+    /// Headshot gore: the round carries a tight ball of brain matter out of the exit wound, which in the
+    /// first instant tears into a few big wrinkled lumps fanning out along the shot, a spray of small
+    /// fragments, and some skull chips. Lumps keep shedding pieces as they fly; everything falls,
+    /// tumbles, and splats where it lands. Real-world sizes: lumps 2-5 cm, fragments under 2 cm.
+    /// </summary>
+    private void BrainBurst(Vector3 pt, Vector3 dir, float power, float scale, float light, float now)
+    {
+        float s = Mathf.Clamp(scale, 0.8f, 1.25f);
+        float life = _cfg.DecalLifetime.Value;
+        Vector3 exit = pt + dir * 0.08f;
+        if (Physics.Linecast(pt, exit, _mask, QueryTriggerInteraction.Ignore)) exit = pt;
+        float speed = Random.Range(3f, 5f) * Mathf.Clamp(Mathf.Sqrt(power), 0.8f, 1.3f);
+        Vector3 g = Physics.gravity;
+        int lumps = Random.Range(3, 6);
+        for (int i = 0; i < lumps; i++)
+        {
+            Vector3 d = (dir + Random.insideUnitSphere * 0.45f + Vector3.up * 0.15f).normalized;
+            Vector3 v = d * speed * Random.Range(0.6f, 1.05f);
+            _brains.Spawn(BrainChunks.Kind.Lump, exit + Random.insideUnitSphere * 0.015f, v, Random.Range(0.011f, 0.022f) * s, light, now, life);
+            // pieces tearing off the lump in flight, from where it is by then
+            int shed = Random.Range(1, 4);
+            for (int k = 0; k < shed; k++)
+            {
+                float t = Random.Range(0.04f, 0.3f);
+                Vector3 at = exit + v * t + 0.5f * t * t * g;
+                if (Physics.Linecast(exit, at, _mask, QueryTriggerInteraction.Ignore)) continue;
+                _brains.Spawn(BrainChunks.Kind.Fragment, at, v + g * t + Random.onUnitSphere * Random.Range(0.5f, 1.5f),
+                    Random.Range(0.004f, 0.009f) * s, light, now + t, life);
+            }
+        }
+        int frags = Mathf.RoundToInt(Random.Range(4, 9) * _load);
+        for (int i = 0; i < frags; i++)
+            _brains.Spawn(BrainChunks.Kind.Fragment, exit, Jitter(dir, 0.7f) * speed * Random.Range(0.5f, 1.2f),
+                Random.Range(0.003f, 0.007f) * s, light, now, life);
+        int chips = Random.Range(2, 4);
+        for (int i = 0; i < chips; i++)
+            _brains.Spawn(BrainChunks.Kind.Bone, exit, Jitter(dir, 0.6f) * speed * Random.Range(0.8f, 1.3f),
+                Random.Range(0.008f, 0.015f) * s, light, now, life);
+    }
+
+    /// <summary>
+    /// A headshot next to a wall paints it, in the order real spatter arrives: a few leading drops,
+    /// then within ~80 ms a wide ragged field of small drops (wider than tall), then over the next
+    /// quarter second the heavy, slower mass fills a dense dark core, and from there two or three
+    /// thick drips start to creep straight down and keep lengthening for seconds. Thin jets fly
+    /// from the head and flatten on the wall so the blood is seen crossing the gap. Added on top
+    /// of the usual headshot effects.
+    /// </summary>
+    private void WallHeadSplatter(Vector3 pt, Vector3 dir, float power, float scale, float floorY, float light, float now)
+    {
+        if (!Physics.Raycast(pt + dir * 0.05f, dir, out RaycastHit wall, 2.5f, _mask, QueryTriggerInteraction.Ignore)) return;
+        Vector3 n = wall.normal;
+        if (Mathf.Abs(n.y) > 0.6f) return; // walls and steep surfaces only; floors have their own splats
+        float s = Mathf.Clamp(scale, 0.8f, 1.25f);
+        float life = _cfg.DecalLifetime.Value;
+        float gap = wall.distance + 0.05f;
+        float t0 = now + gap / 7f;
+        // the cone of blood widens with the gap: ~0.4 m across up close, ~1 m at two metres
+        float R = Mathf.Clamp(0.17f + 0.17f * gap, 0.18f, 0.5f) * Mathf.Clamp(Mathf.Sqrt(power), 0.8f, 1.2f) * s;
+        Vector3 h = Vector3.Cross(Vector3.up, n);
+        if (h.sqrMagnitude < 1e-4f) h = Vector3.Cross(Vector3.forward, n);
+        h.Normalize();
+        Vector3 v = Vector3.Cross(n, h);
+        Vector3 slide = dir - n * Vector3.Dot(dir, n);   // oblique shots smear the pattern along the wall
+        Vector3 centre = wall.point;
+        float lightW = LightAt(centre, n);
+
+        // the wide field: many small drops, denser toward the middle, radial tails, a little ragged
+        int halo = Mathf.RoundToInt(_tier.Droplets * 3f * Mathf.Clamp(power, 0.7f, 1.4f) * _load);
+        for (int i = 0; i < halo; i++)
+        {
+            float a = Random.value * 6.283f, d = Mathf.Pow(Random.value, 0.75f);
+            Vector3 radial = h * (Mathf.Cos(a) * 1.25f) + v * (Mathf.Sin(a) * 0.95f);
+            Vector3 off = radial * (R * d * Random.Range(0.85f, 1.1f)) + slide * (R * d * 0.6f);
+            float rr = Mathf.Lerp(0.0015f, 0.009f, Mathf.Pow(Random.value, 3.5f)) * s;
+            float el = 1f + d * Random.Range(0.3f, 1.6f);
+            PlaceOnWall(centre + off, n, radial + slide * 0.5f, rr, el, lightW * Random.Range(0.75f, 1f), t0 + Random.value * 0.05f, life);
+        }
+        // the dense core arrives a moment later and keeps building up
+        int core = Mathf.RoundToInt(_tier.Droplets * 2f * Mathf.Clamp(power, 0.7f, 1.4f) * _load);
+        float rc = R * 0.38f;
+        for (int i = 0; i < core; i++)
+        {
+            float a = Random.value * 6.283f, d = Mathf.Pow(Random.value, 0.8f);
+            Vector3 radial = h * (Mathf.Cos(a) * 1.15f) + v * Mathf.Sin(a);
+            Vector3 off = radial * (rc * d) + slide * (rc * d * 0.5f);
+            float rr = Random.Range(0.005f, 0.016f) * s;
+            PlaceOnWall(centre + off, n, radial, rr, Random.Range(1f, 1.4f), lightW * Random.Range(0.55f, 0.8f),
+                t0 + 0.04f + Mathf.Pow(Random.value, 1.5f) * 0.22f, life);
+        }
+        int merged = Random.Range(3, 6);
+        for (int i = 0; i < merged; i++)
+        {
+            Vector2 o = Random.insideUnitCircle * rc * 0.7f;
+            Vector3 p = centre + h * o.x + v * o.y;
+            if (!Physics.Raycast(p + n * 0.12f, -n, out RaycastHit hit, 0.3f, _mask, QueryTriggerInteraction.Ignore) || Vector3.Dot(hit.normal, n) < 0.6f) continue;
+            _splats.Add(hit.point, hit.normal, Random.Range(0.018f, 0.04f) * s, Tint(PoolBase, lightW, 1f),
+                t0 + 0.06f + Random.value * 0.2f, Random.Range(0.15f, 0.3f), life, 0.6f);
+        }
+
+        // drips: thick runs creeping straight down out of the core, one sometimes from the outer field
+        Vector3 down = Vector3.down - n * Vector3.Dot(Vector3.down, n);
+        if (down.sqrMagnitude > 0.05f)
+        {
+            down.Normalize();
+            int runs = Random.Range(2, 4);
+            for (int i = 0; i < runs; i++)
+            {
+                bool outer = i == runs - 1 && Random.value < 0.4f;
+                Vector2 o = Random.insideUnitCircle * (outer ? R * 0.75f : rc * 0.6f);
+                Vector3 p = centre + h * o.x + v * o.y;
+                if (!Physics.Raycast(p + n * 0.12f, -n, out RaycastHit hit, 0.3f, _mask, QueryTriggerInteraction.Ignore) || Vector3.Dot(hit.normal, n) < 0.6f) continue;
+                float len = Random.Range(0.12f, 0.35f) * (R / 0.35f) * (outer ? 0.5f : 1f);
+                float w = Random.Range(0.007f, 0.012f) * s * (outer ? 0.7f : 1f);
+                _trails.Add(hit.point, hit.normal, down, len, w, (Color)Tint(StreamBase, lightW * 0.7f, 1f),
+                    t0 + Random.Range(0.4f, 1.2f), Random.Range(2.5f, 5f), life, 0.1f);
+            }
+        }
+
+        // the blood crossing the gap: thin fast jets that flatten on the wall
+        Color jet = Tint(StreamBase, light, 1f);
+        int jets = Random.Range(5, 9);
+        for (int i = 0; i < jets; i++)
+        {
+            Vector2 o = Random.insideUnitCircle * R * 0.8f;
+            Vector3 aim = (centre + h * o.x + v * o.y) - pt;
+            var sp = new BloodStreams.Spec
+            {
+                Origin = pt, Velocity = aim.normalized * Random.Range(6f, 9f),
+                Emit = Random.Range(0.03f, 0.07f), Life = Random.Range(0.12f, 0.2f), Radius = Random.Range(0.004f, 0.008f) * s,
+                Decay = 0.5f, Breakup = Random.Range(1.4f, 2f), Gravity = 1f, FloorY = floorY, Light = light, Col = jet,
+                HasWall = true, WallP = wall.point, WallN = n
+            };
+            _streams.Spawn(ref sp, now);
+        }
+    }
+
+    /// <summary>One drop of wall spatter, laid on the real surface (skipped where there is none).</summary>
+    private void PlaceOnWall(Vector3 p, Vector3 n, Vector3 travel, float r, float el, float light, float due, float life)
+    {
+        if (!Physics.Raycast(p + n * 0.12f, -n, out RaycastHit hit, 0.3f, _mask, QueryTriggerInteraction.Ignore)) return;
+        if (Vector3.Dot(hit.normal, n) < 0.5f) return;
+        QueueStuck(hit.point, hit.normal, travel, r, el, (Color)Tint(StreamBase, light, 1f), due, life);
+    }
+
+    /// <summary>A gore chunk splatted: big lumps leave a small spatter of blood around them, small ones a single bead.</summary>
+    private void OnChunkLanded(Vector3 p, Vector3 n, Vector3 vel, float r)
+    {
+        if (!_cfg.Enabled.Value) return;
+        float light = LightAt(p, n);
+        if (r > 0.01f)
+            SpatterDrops(p, n, vel.sqrMagnitude > 1e-4f ? vel.normalized : -n, Time.time, r * 7f, 0.35f, light);
+        else
+        {
+            Vector3 slide = vel - n * Vector3.Dot(vel, n);
+            Color col = (Color)Tint(StreamBase, light * Random.Range(0.75f, 1f), 1f);
+            _stuck.Add(p, n, slide, r * 1.6f, 1f + Mathf.Clamp(slide.magnitude * 0.3f, 0f, 1.5f), col, _cfg.DecalLifetime.Value, Time.time);
+        }
+    }
+
+    private static bool HeadGone(Player victim)
+    {
+        try { return victim.HealthController != null && victim.HealthController.GetBodyPartHealth(EBodyPart.Head).Current <= 0f; }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// The head comes off: shards of it fly, a torn stump is left on the neck, and the neck keeps
+    /// pumping blood for a few seconds and then drips. The usual headshot effects still play.
+    /// </summary>
+    private void Decapitate(Player victim, ref DamageInfo di, Vector3 dir, float power, float scale, float floorY, Vector3 floorN, float light,
+        Color32 decalCol, float now)
+    {
+        bool ok;
+        Vector3 cut, up;
+        Transform neck;
+        // most kills keep the entry side of the face; heavy rounds and the rest take the whole head
+        bool half = di.Damage < _cfg.WholeHeadDamage.Value && Random.value < _cfg.HalfFaceChance.Value;
+        try { ok = _heads.Dismember(victim, dir, ref half, light, _cfg.DecalLifetime.Value, now, out cut, out up, out neck); }
+        catch (System.Exception e)
+        {
+            BloodFXPlugin.Log.LogWarning($"BloodFX: head dismember failed: {e.Message}");
+            return;
+        }
+        if (!ok) return;
+        _decapitations++;
+        if (half) _halfHeads++;
+        Vector3 mid = half ? cut : cut + up * 0.08f;
+        if (_cfg.BrainMatter.Value) BrainBurst(mid, (dir + Vector3.up * 0.3f).normalized, power * (half ? 1.2f : 1.5f), scale, light, now);
+        MistBurst(mid, dir, power * 2f, scale, floorY, light, now);
+        if (!_cfg.Streams.Value) return;
+        if (half)
+        {
+            // the open side of the head pours and drips; no neck jets, the neck is whole
+            Spawn(Spurt.Pour, cut, up, power, scale, floorY, floorN, light, decalCol, now, neck);
+            Spawn(Spurt.Gush, cut, up, power, scale, floorY, floorN, light, decalCol, now, neck);
+            AddDrip(neck, cut, up, power, scale, light, now);
+            return;
+        }
+        // the neck: two pumping jets out of the stump, a slower pour, then it drips
+        Spawn(Spurt.Arterial, cut, up, power, scale, floorY, floorN, light, decalCol, now, neck);
+        Spawn(Spurt.Arterial, cut, (up + Random.insideUnitSphere * 0.4f).normalized, power * 0.7f, scale * 0.8f, floorY, floorN, light, decalCol, now, neck);
+        Spawn(Spurt.Pour, cut, dir, power, scale, floorY, floorN, light, decalCol, now, neck);
+        AddDrip(neck, cut, up, power, scale, light, now);
+    }
+
+    private void LateUpdate()
+    {
+        if (_ready && _heads != null) _heads.LateTick();
     }
 
     private static Vector3 Jitter(Vector3 dir, float spread)
@@ -739,6 +978,7 @@ public class BloodManager : MonoBehaviour
     /// </summary>
     private void EmitSpray(Vector3 pos, Vector3 dir, int count, float spread, float vMin, float vMax, Color32 col, float scale, float floorY)
     {
+        count = Mathf.RoundToInt(count * _load);
         for (int i = 0; i < count; i++)
         {
             Vector3 d = (dir + Random.insideUnitSphere * spread).normalized;
@@ -800,6 +1040,7 @@ public class BloodManager : MonoBehaviour
     private int PuddleCapacity() => _tier.Wounds * 2;
     private int SplatCapacity() => _tier.Wounds * 5;
     private int TrailCapacity() => _tier.Wounds * 2;
+    private int BrainCapacity() => _tier.Wounds * 10;
 
     /// <summary>
     /// The stain left by spray hitting a surface, built from real drops: a few heavy
@@ -818,7 +1059,7 @@ public class BloodManager : MonoBehaviour
         float scale = Mathf.Clamp(Mathf.Sqrt(_cfg.Intensity.Value), 0.5f, 1.6f);
         float reach = size * 0.5f;
         int core = Random.Range(2, 5);
-        int count = core + Mathf.RoundToInt(_tier.Droplets * 1.5f * Mathf.Clamp(power, 0.4f, 1.6f));
+        int count = core + Mathf.RoundToInt(_tier.Droplets * 1.5f * Mathf.Clamp(power, 0.4f, 1.6f) * _load);
         float life = _cfg.DecalLifetime.Value;
         for (int i = 0; i < count; i++)
         {
@@ -933,7 +1174,7 @@ public class BloodManager : MonoBehaviour
             {
                 Origin = origin, Velocity = radial * Random.Range(1.2f, 2.6f) + slide * 0.5f + normal * 0.05f,
                 Emit = Random.Range(0.04f, 0.09f), Life = 0.22f, Radius = Random.Range(0.006f, 0.012f) * scale * Mathf.Sqrt(power),
-                Decay = 0.6f, Breakup = 1.6f, Gravity = 0.6f, FloorY = floorY, Light = light, Col = Tint(StreamBase, light, 1f),
+                Decay = 0.6f, Breakup = 1.6f, Gravity = 1f, FloorY = floorY, Light = light, Col = Tint(StreamBase, light, 1f),
                 HasWall = true, WallP = pos, WallN = normal
             };
             _streams.Spawn(ref sp, now);
@@ -956,12 +1197,12 @@ public class BloodManager : MonoBehaviour
     }
 
     /// <summary>A wound that keeps forming hanging teardrops which let go, fall and spot the floor.</summary>
-    private void AddDrip(Transform t, Vector3 worldPoint, Vector3 normal, float power, float scale, float light, float now)
+    private bool AddDrip(Transform t, Vector3 worldPoint, Vector3 normal, float power, float scale, float light, float now)
     {
         int limit = Mathf.Min(_tier.Wounds, WoundSlots), slot = -1;
         for (int i = 0; i < limit; i++)
             if (_dripEnd[i] <= now) { slot = i; break; }
-        if (slot < 0) return;
+        if (slot < 0) return false;
         float dur = Mathf.Clamp(3f + 4f * power, 3f, 12f);
         _dripEnd[slot] = now + dur;
         Vector3 origin = worldPoint + normal * 0.012f;
@@ -973,6 +1214,85 @@ public class BloodManager : MonoBehaviour
             Anchor = t, AnchorLocal = t.InverseTransformPoint(origin)
         };
         _streams.Spawn(ref s, now);
+        return true;
+    }
+
+    // ---------------------------------------------------------------- bleeding
+
+    private struct Wound
+    {
+        public Transform T;
+        public Vector3 Local, LocalN;
+    }
+
+    private readonly Dictionary<int, Wound> _wounds = new Dictionary<int, Wound>();
+    private readonly Dictionary<int, float> _bleedDripUntil = new Dictionary<int, float>();
+
+    internal bool ReplacesBleeding => _ready && _cfg.Enabled.Value && _cfg.BleedDrips.Value;
+
+    /// <summary>The latest hole in each character, so their bleeding drips from where they were hit.</summary>
+    private void RememberWound(Player victim, Transform t, Vector3 pt, Vector3 n)
+    {
+        if (_wounds.Count > 512) _wounds.Clear();
+        _wounds[victim.GetInstanceID()] = new Wound { T = t, Local = t.InverseTransformPoint(pt), LocalN = t.InverseTransformDirection(n.normalized) };
+    }
+
+    /// <summary>
+    /// EFT's bleeding tick (every 1-3 s per bleeding character): instead of a flat stain under them, a
+    /// teardrop keeps forming at the wound, lets go, falls and splashes, so a moving character leaves
+    /// a trail of real drops. Without a known wound the drops fall from the hips.
+    /// </summary>
+    internal void OnBleedTick(Player p)
+    {
+        if (p == null || !_ready) return;
+        float now = Time.time;
+        int id = p.GetInstanceID();
+        Transform t = null;
+        Vector3 pt, n;
+        if (_wounds.TryGetValue(id, out Wound w) && w.T != null && w.T.gameObject.activeInHierarchy)
+        {
+            t = w.T;
+            pt = t.TransformPoint(w.Local);
+            n = t.TransformDirection(w.LocalN);
+        }
+        else
+        {
+            Transform pelvis = p.PlayerBones?.Pelvis?.Original != null ? ((Component)p.PlayerBones.Pelvis.Original).transform : p.Transform.Original;
+            pt = pelvis.position + Random.insideUnitSphere * 0.08f;
+            n = Vector3.down;
+        }
+        if (Viewer(out Vector3 eye, out _) && (pt - eye).sqrMagnitude > _cfg.MaxDistance.Value * _cfg.MaxDistance.Value) return;
+        float light = LightAt(pt, n);
+        float scale = Mathf.Clamp(Mathf.Sqrt(_cfg.Intensity.Value), 0.5f, 1.6f);
+        // your own wounds would drip in front of the camera; you get only the drops landing
+        bool ownView = p.IsYourPlayer && !_cfg.PlayerHits.Value;
+        if (!ownView && t != null && _cfg.Streams.Value && (!_bleedDripUntil.TryGetValue(id, out float until) || now >= until))
+        {
+            if (AddDrip(t, pt, n, 0.5f, scale, light, now))
+            {
+                if (_bleedDripUntil.Count > 512) _bleedDripUntil.Clear();
+                _bleedDripUntil[id] = now + 4f; // renewed just before it runs dry, so the dripping doesn't stop
+                return;
+            }
+        }
+        if (ownView && t != null) pt = p.Transform.position + Vector3.up * 0.9f + Random.insideUnitSphere * 0.1f;
+        FallingDrop(pt, light, now);
+    }
+
+    /// <summary>One drop let go at <paramref name="pos"/>: falls as a blob and splashes where it lands.</summary>
+    private void FallingDrop(Vector3 pos, float light, float now)
+    {
+        if (!Physics.Raycast(pos, Vector3.down, out RaycastHit hit, 3f, _mask, QueryTriggerInteraction.Ignore)) return;
+        float r = Random.Range(0.0035f, 0.006f) * Mathf.Clamp(Mathf.Sqrt(_cfg.Intensity.Value), 0.5f, 1.6f);
+        float fall = Mathf.Sqrt(2f * hit.distance / 9.81f);
+        Color col = (Color)Tint(StreamBase, light, 1f);
+        DripSplash(hit.point, hit.normal, r, col, now + fall);
+        _blobParams.position = pos;
+        _blobParams.velocity = new Vector3(0f, -0.25f, 0f);
+        _blobParams.startLifetime = Mathf.Max(0.05f, fall);
+        _blobParams.startSize3D = new Vector3(r * 2f, r * 2.6f, r * 2f);
+        _blobParams.startColor = col;
+        _blobs.Emit(_blobParams, 1);
     }
 
     private int BodyCapacity() => Mathf.Max(32, _tier.Decals / 3);
@@ -1023,6 +1343,7 @@ public class BloodManager : MonoBehaviour
 
     private void Update()
     {
+        TrackLoad();
         if (!_ready) return;
         float now = Time.time;
         if (now >= _worldCheck)
@@ -1038,10 +1359,40 @@ public class BloodManager : MonoBehaviour
             {
                 _lastSeen = _seen;
                 BloodFXPlugin.Log.LogInfo($"BloodFX: hits seen {_seen}, spawned {_spawned}; skipped player {_skipPlayer}, armor/zero {_skipArmor}, " +
-                    $"type {_skipType}, far {_skipFar}, budget {_skipBudget}; conforming marks {_marks.Built} (skinned {_marks.Skinned}, rigid {_marks.Rigid}, missed {_marks.Missed}); live streams {_streams.LiveCount}, blobs {_blobs.particleCount}");
+                    $"type {_skipType}, far {_skipFar}, budget {_skipBudget}; conforming marks {_marks.Built} (skinned {_marks.Skinned}, rigid {_marks.Rigid}, missed {_marks.Missed}); live streams {_streams.LiveCount}, blobs {_blobs.particleCount}, " +
+                    $"decals {_decals.LiveCount}, body marks {_body.LiveCount}, stuck drops {_stuck.LiveCount}, pools {_puddles.LiveCount}, " +
+                    $"splats {_splats.LiveCount}, trails {_trails.LiveCount}, brain chunks {_brains.LiveCount}, " +
+                    $"load {_load:F2}, heads off {_decapitations} (half face {_halfHeads}; on bodies {_heads.CutCount}, shards {_heads.ShardCount})");
             }
         }
         if (!_cfg.Enabled.Value) return;
+        // a fault in one effect must not stop the others (or the hits) without a word in the log
+        try { TickEffects(now); }
+        catch (System.Exception e)
+        {
+            if (_tickErrors++ < 3) BloodFXPlugin.Log.LogError($"BloodFX: update error: {e}");
+        }
+    }
+
+    private int _tickErrors;
+
+    /// <summary>
+    /// Watches frame time. When frames run slower than this player's usual (or than TargetFps, if set),
+    /// spawn counts scale down at once, as low as 30%, and recover over a couple of seconds once it's smooth again.
+    /// </summary>
+    private void TrackLoad()
+    {
+        float dt = Time.unscaledDeltaTime;
+        if (dt <= 0f || dt > 0.5f) return; // loading screens and pauses tell us nothing
+        _fastDt = _fastDt <= 0f ? dt : Mathf.Lerp(_fastDt, dt, 0.15f);
+        _slowDt = _slowDt <= 0f ? dt : Mathf.Lerp(_slowDt, dt, 0.003f);
+        float budget = _cfg.TargetFps.Value > 0 ? 1f / _cfg.TargetFps.Value : _slowDt * 1.2f;
+        float want = Mathf.Clamp(budget / Mathf.Max(1e-4f, _fastDt), 0.3f, 1f);
+        _load = want < _load ? want : Mathf.MoveTowards(_load, want, 0.4f * dt);
+    }
+
+    private void TickEffects(float now)
+    {
         _landedThisFrame = 0;
 
         for (int i = 0; i < PendingSlots; i++)
@@ -1072,6 +1423,8 @@ public class BloodManager : MonoBehaviour
         }
 
         _streams.Tick(now, haveEye ? eye : Vector3.zero);
+        _brains.Tick(now, Time.deltaTime, haveEye ? eye : Vector3.zero);
+        _heads.Tick(now, Time.deltaTime);
         for (int i = 0; i < _streams.DetachCount; i++)
         {
             BloodStreams.Detach d = _streams.GetDetach(i);

@@ -40,6 +40,8 @@ internal partial class NmBody
     private static readonly int[] SpineBones = { 7, 8, 10 };
     private const float SpineTwistMax = 50f; // deg the chest may turn against the pelvis
     private const float WristTurnMax = 60f;  // deg a free hand may turn from its takeover angle on the forearm
+    private const float HingeRollFrom = 12f, HingeRollFull = 30f; // knee / elbow bend (deg) over which the bend takes over the hinge
+    private const float HingeTurnRate = 720f; // deg/s a knee / elbow hinge may turn about its bone: a real one never flips over in a frame
 
     private readonly Vector3[] _lockPivot = new Vector3[21];
     private readonly bool[] _lockOk = new bool[21];
@@ -54,6 +56,11 @@ internal partial class NmBody
     private static readonly int[,] Limbs = { { 1, 2, 3 }, { 4, 5, 6 }, { 14, 15, 16 }, { 18, 19, 20 } };
     private readonly Vector3[] _kneeAxis = new Vector3[4];
     private readonly bool[] _kneeAxisOk = new bool[4];
+    // each knee / elbow's hinge (world) last frame, carried over so it turns smoothly
+    private readonly Vector3[] _hinge = new Vector3[4];
+    private readonly bool[] _hingeHave = new bool[4];
+
+    private void HingeAttach() { for (int s = 0; s < 4; s++) _hingeHave[s] = false; }
 
     /// Before the physics overwrites the limbs: where the animation's knees and elbows hinge (only from a bent joint).
     private void KneeAxisSample()
@@ -177,19 +184,39 @@ internal partial class NmBody
         if (bend.sqrMagnitude < 1e-6f) bend = Vector3.ProjectOnPlane(B.position - ap, dir);
         if (bend.sqrMagnitude < 1e-8f) return;
         bend.Normalize();
+        // the hinge this knee / elbow had last frame (at the takeover: the doll's upper arm / thigh's, which is
+        // then the animation's). A knee or elbow only bends one way: a doll joint that reads past straight (a
+        // locked knee) or flips sides near straight is bent the way the hinge already points, or SPT's limb
+        // would roll round and bend backwards with it
+        Vector3 prev = !_kneeAxisOk[limb] ? Vector3.zero : _hingeHave[limb] ? _hinge[limb]
+            : PartRot(a) * (Quaternion.Inverse(_partRot0[a]) * _boneRot0[a]) * _kneeAxis[limb];
+        if (Vector3.Dot(Vector3.Cross(bend, dir), prev) < 0f) bend = -bend;
         float cosA = Mathf.Clamp((la * la + d * d - lb * lb) / (2f * la * d), -1f, 1f);
         Vector3 mid = ap + dir * (la * cosA) + bend * (la * Mathf.Sqrt(1f - cosA * cosA));
         A.rotation = Quaternion.FromToRotation(B.position - ap, mid - ap) * A.rotation;
         Vector3 end = ap + dir * d;
-        // knee / elbow: roll the upper bone about itself so SPT's hinge is the bend's (a near-straight limb has no bend to match)
+        // knee / elbow: roll the upper bone about itself so SPT's hinge lines up. The aim leaves the roll to
+        // FromToRotation off the rest pose, which flips 180 deg as the limb swings past straight up from rest
+        // (an arm overhead): the "arm spin". So the roll is set outright: last frame's hinge carried over while
+        // the limb is near straight (nothing to read), the bend's once it bends enough to read, and never
+        // turning faster than a real joint could.
         if (_kneeAxisOk[limb])
         {
             Vector3 upper = mid - ap, want = Vector3.Cross(upper, end - mid);
-            if (want.sqrMagnitude > 1e-6f * upper.sqrMagnitude && Vector3.Angle(upper, end - mid) > 5f)
+            Vector3 keep = Vector3.ProjectOnPlane(prev, upper);
+            float w = want.sqrMagnitude > 1e-6f * upper.sqrMagnitude
+                ? Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(HingeRollFrom, HingeRollFull, Vector3.Angle(upper, end - mid))) : 0f;
+            Vector3 hinge = keep.sqrMagnitude < 1e-8f ? want
+                : Vector3.RotateTowards(keep.normalized, w > 0f ? Vector3.Slerp(keep.normalized, want.normalized, w) : keep.normalized,
+                                        HingeTurnRate * Mathf.Deg2Rad * Time.deltaTime, 0f);
+            if (hinge.sqrMagnitude > 1e-8f)
             {
-                float roll = Vector3.SignedAngle(Vector3.ProjectOnPlane(A.rotation * _kneeAxis[limb], upper), want, upper);
+                float roll = Vector3.SignedAngle(Vector3.ProjectOnPlane(A.rotation * _kneeAxis[limb], upper), hinge, upper);
                 A.rotation = Quaternion.AngleAxis(roll, upper) * A.rotation;
             }
+            _hinge[limb] = A.rotation * _kneeAxis[limb];
+            _hingeHave[limb] = true;
+            HingeSeen(limb, _hinge[limb]);
         }
         B.rotation = Quaternion.FromToRotation(C.position - B.position, end - B.position) * B.rotation;
     }

@@ -19,7 +19,11 @@ namespace EuphoriaReaction;
 /// </summary>
 internal static class GunMarkers
 {
-    private const float Agree = 0.03f, AgreeDeg = 12f, GripGate = 0.22f, IkGate = 0.05f;
+    private const float Agree = 0.03f, AgreeDeg = 12f, GripGate = 0.22f;
+    internal const float IkGate = 0.05f;
+    // The palm on a right-hand IK marker, across all guns: EFT's IK puts the palm on it the same way on
+    // each, so a gun never seen before still sits in the hand at the right angle.
+    private const string AnyIk = "* any gun on its right-hand IK marker";
 
     internal struct Marker
     {
@@ -85,18 +89,48 @@ internal static class GunMarkers
     }
 
     /// Where the game itself puts the right hand on this gun (its hand IK target), else the pistol-grip mount.
+    /// The IK marker first: the palm sits exactly on it, while the hand marker is often 12-14 cm off.
     internal static Transform GripMount(Transform gun, out float gate)
     {
         gate = GripGate;
         if (gun == null) return null;
-        Transform grip = null;
+        Transform hand = null, grip = null;
         foreach (Transform t in gun.GetComponentsInChildren<Transform>(true))
         {
             string n = t.name.ToLowerInvariant();
-            if (n == "weapon_r_ik_marker" || n == "weapon_r_hand_marker") { gate = IkGate; return t; }
+            if (n == "weapon_r_ik_marker") { gate = IkGate; return t; }
+            if (hand == null && n == "weapon_r_hand_marker") hand = t;
             if (grip == null && (n.Contains("pistol_grip") || n.Contains("pistolgrip"))) grip = t;
         }
+        if (hand != null) { gate = IkGate; return hand; }
         return grip;
+    }
+
+    /// The palm in a right-hand IK marker's frame, learned across all guns.
+    internal static bool TryGetAnyIk(out Vector3 pos, out Quaternion rot)
+    {
+        pos = default; rot = default;
+        if (!_known.TryGetValue(AnyIk, out Marker m) || m.Seen < 2) return false;
+        pos = m.Pos; rot = m.Rot;
+        return true;
+    }
+
+    // a palm on the marker: averaged in (a frame more than 20 deg off the average is an odd one, left out)
+    private static void ObserveAnyIk(Transform mount, Transform palm)
+    {
+        Quaternion inv = Quaternion.Inverse(mount.rotation);
+        var s = new Marker { Pos = inv * (palm.position - mount.position), Rot = inv * palm.rotation, Seen = 1 };
+        if (_known.TryGetValue(AnyIk, out Marker k))
+        {
+            if (k.Seen >= 2 && Quaternion.Angle(k.Rot, s.Rot) > 20f) return;
+            k.Seen++;
+            float w = 1f / Mathf.Min(k.Seen, 20);
+            k.Pos = Vector3.Lerp(k.Pos, s.Pos, w); k.Rot = Quaternion.Slerp(k.Rot, s.Rot, w);
+            s = k;
+        }
+        _known[AnyIk] = s;
+        if (s.Seen == 2) EuphoriaPlugin.Log("Delirium: grip angle on the right-hand IK marker learned (any gun)");
+        if (s.Seen == 2 || s.Seen % 10 == 0) Save();
     }
 
     internal static bool TryGet(string key, out Marker m)
@@ -112,6 +146,7 @@ internal static class GunMarkers
         Scan(key, gun, palm);
         Transform mount = GripMount(gun, out float gate);
         if (mount != null && (palm.position - mount.position).magnitude > gate) return; // hand not on the grip
+        if (mount != null && gate == IkGate) ObserveAnyIk(mount, palm);
         Quaternion inv = Quaternion.Inverse(gun.rotation);
         var s = new Marker { Pos = inv * (palm.position - gun.position), Rot = inv * palm.rotation, Seen = 1 };
         if (_known.TryGetValue(key, out Marker k))

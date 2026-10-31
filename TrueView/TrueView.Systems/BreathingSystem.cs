@@ -15,14 +15,23 @@ namespace TrueView.Systems;
 ///   running   - only while sprinting; gets louder as stamina runs out.
 ///   deep fast - stamina under 50% (louder the emptier you are), and under
 ///               adrenaline, where it follows the level with a slow recovery.
-///   nose      - stamina climbing back from 50%: full at 50%, gone at 85%.
+///   nose      - stamina climbing back from 50%: full at 50%, gone at 85%;
+///               and the adrenaline calm-down (below).
+///
+/// Adrenaline calm-down: every trigger starts an episode that adds up how
+/// much adrenaline went through you. When the heavy breathing has settled
+/// it hands over (a slow crossfade) to nose breathing whose length, loudness
+/// and pace come from that total, so a distant shot gets a short tail and a
+/// long fight a long one. The tail slows and fades as it runs, waits while
+/// adrenaline is still up and stretches while stamina is low. A new trigger
+/// during it cuts straight back to heavy breathing.
 ///
 /// Holding breath silences all of it. Each loop is stopped outright once it
 /// has faded to zero, and a watchdog on the audio object fades everything out
 /// if the handling tick stops (menus, inventory, death, raid end), so no
 /// loop can be left running.
 ///
-/// Also owns the breath cycle for the camera: HeadAttachSystem reads
+/// Also owns the breath cycle for the camera: BodyCamSystem reads
 /// <see cref="Phase"/> and <see cref="Depth"/>; AdrenalineSystem reads
 /// <see cref="HeartRateMod"/> and <see cref="HeartMask"/>.
 ///
@@ -42,6 +51,8 @@ internal static class BreathingSystem
         public AudioSource Source;
         public float RetryAt;
         public float Volume;             // current, 0..1 before master and gain
+        public float PitchBase = 1f;     // random per take
+        public float Pitch = 1f;         // live multiplier (the calm-down slows the nose loop)
     }
 
     private static readonly Layer Running = new() { File = "breath_running.wav", TrimStart = 0.5f, TrimEnd = 23.5f, Gain = 0.9f, FadeIn = 0.6f, FadeOut = 1.2f };
@@ -60,9 +71,20 @@ internal static class BreathingSystem
     private static float _staminaRate;
     private static float _recoveringUntil;
 
-    private enum State { None, Run, Deep, Nose }
+    // Adrenaline episode: trigger -> heavy -> calm-down -> normal.
+    private static float _lastLevel;
+    private static float _kick;          // short heavy-breath burst from a fresh trigger
+    private static float _load, _peak;   // adrenaline-seconds and peak level this episode
+    private static bool _heavy;
+    private static float _heavySince;
+    private static float _calmLeft, _calmTotal, _calmVolume, _calmIntensity, _calmSince;
+
+    private enum State { None, Run, Deep, CalmNose, Nose }
     private static State _state, _pending;
-    private static float _pendingSince;
+    private static float _pendingSince, _stateSince;
+
+    /// <summary>0..1 how big the episode was: ~0 for a distant shot, ~0.5 for a hit, ~1 for a long fight.</summary>
+    private static float Intensity => 1f - Mathf.Exp(-_load / 6f);
 
     /// <summary>Breath cycle in radians, 0..2pi: inhale first half, exhale second.</summary>
     public static float Phase => _phase;
@@ -99,17 +121,66 @@ internal static class BreathingSystem
         float fatigue = 1f - Mathf.Min(stamina, HandlingState.Oxygen01);
         float exRate = fatigue > _exertion ? 1.2f : 0.06f;
         _exertion = Mathf.Lerp(_exertion, fatigue, 1f - Mathf.Exp(-exRate * 8f * dt));
-        float exertionGain = Mathf.Clamp01(_exertion * (HandlingConfig.HeadExertion?.Value ?? 1f));
+        float exertionGain = Mathf.Clamp01(_exertion * (HandlingConfig.BodyCamExertion?.Value ?? 1f));
 
         // Adrenaline: follow spikes at once, recover with a lag on top of
         // the adrenaline drain so you hear yourself settle down after it.
+        // The bigger the episode so far, the slower the heavy breathing settles.
         float level = AdrenalineSystem.Level;
-        float adrRate = level > _adrenaline ? 12f : 3f / Mathf.Max(1f, HandlingConfig.AdrenalineDecay?.Value ?? 8f);
+        float settle = 3f / Mathf.Max(1f, HandlingConfig.AdrenalineDecay?.Value ?? 8f) / Mathf.Lerp(1f, 1.8f, Intensity);
+        float adrRate = level > _adrenaline ? 12f : settle;
         _adrenaline = Mathf.Lerp(_adrenaline, level, 1f - Mathf.Exp(-adrRate * dt));
         float adr = Mathf.Pow(Mathf.Clamp01((_adrenaline - 0.08f) / 0.92f), 1.2f);
 
-        float rate = Mathf.Max(Mathf.Lerp(0.2f, 0.52f, exertionGain), Mathf.Lerp(0.2f, 0.62f, _adrenaline));
-        Depth = Mathf.Max(exertionGain, _adrenaline * 0.85f);
+        // --- Adrenaline episode: trigger -> heavy -> calm-down -> normal ---
+        bool calmOn = HandlingConfig.CalmDownEnabled?.Value != false;
+        float jump = level - _lastLevel;
+        _lastLevel = level;
+        if (alive && jump > 0.04f)
+        {
+            // A fresh trigger: catch your breath, even after a distant shot.
+            _kick = Mathf.Max(_kick, Mathf.Clamp01(0.35f + 1.5f * jump));
+            if (_calmTotal > 0f)
+            {
+                Log.Info($"Breathing: calm-down cut short after {Time.time - _calmSince:0.0}s of {_calmTotal:0.0}s by a new trigger (adrenaline {level:0.00}), back to heavy");
+                _calmLeft = _calmTotal = 0f;
+            }
+        }
+        _kick = Mathf.Max(0f, _kick - dt / 4f);
+        if (level > 0f) { _load += level * dt; _peak = Mathf.Max(_peak, level); }
+
+        // Heavy breathing hands over to the calm-down once it has settled;
+        // during the calm-down it takes a fresh trigger or a real rise in
+        // adrenaline to bring it back.
+        float need = _heavy ? (calmOn ? 0.2f : 0.05f) : _calmTotal > 0f ? 0.3f : 0.05f;
+        bool heavy = alive && (_kick > 0.1f || adr > need);
+        if (heavy && !_heavy) _heavySince = Time.time;
+        if (!heavy && _heavy && calmOn && alive && _load > 0f) StartCalm(fatigue);
+        _heavy = heavy;
+
+        float calm = 0f; // calm-down left, 1 at the handover .. 0 at the end
+        if (_calmTotal > 0f)
+        {
+            if (!calmOn || !alive) _calmLeft = _calmTotal = 0f;
+            else
+            {
+                // Runs as the adrenaline drains (waits while it is still up),
+                // slower while out of breath, paused while sprinting.
+                float drain = Mathf.Clamp01((0.25f - adr) / 0.2f) * Mathf.Lerp(1f, 0.5f, fatigue);
+                if (!sprinting) _calmLeft = Mathf.Max(0f, _calmLeft - dt * drain);
+                if (_calmLeft <= 0f && adr < 0.05f)
+                {
+                    Log.Info($"Breathing: calm-down done after {Time.time - _calmSince:0.0}s (planned {_calmTotal:0.0}s), breathing back to normal");
+                    _calmLeft = _calmTotal = 0f;
+                }
+                else calm = Mathf.Max(0.01f, _calmLeft / _calmTotal);
+            }
+        }
+        if (!_heavy && _calmTotal <= 0f && adr < 0.05f) _load = _peak = 0f;
+        float calmPace = calm * Mathf.Lerp(0.5f, 1f, _calmIntensity);
+
+        float rate = Mathf.Max(Mathf.Max(Mathf.Lerp(0.2f, 0.52f, exertionGain), Mathf.Lerp(0.2f, 0.62f, _adrenaline)), Mathf.Lerp(0.2f, 0.42f, calmPace));
+        Depth = Mathf.Max(exertionGain, Mathf.Max(_adrenaline * 0.85f, calmPace * 0.4f));
         if (!HandlingState.IsHoldingBreath)
         {
             _phase += Mathf.PI * 2f * rate * dt;
@@ -118,34 +189,45 @@ internal static class BreathingSystem
 
         // --- One breathing state at a time, by priority ---
         //   hold breath > sprinting (running) > adrenaline or stamina < 50%
-        //   (deep fast) > recovering 50..85% (nose) > silent.
+        //   (deep fast) > adrenaline calm-down (nose) > recovering 50..85%
+        //   (nose) > silent.
         // The others fade out, so a switch is a short crossfade, never two
-        // breathing tracks on top of each other.
+        // breathing tracks on top of each other; only the handover from heavy
+        // to the calm-down overlaps for a couple of seconds.
         float runVol = Mathf.Max(0.2f + 0.8f * Mathf.SmoothStep(0f, 1f, (0.6f - stamina) / 0.55f), adr);
         float low = stamina < 0.5f ? Mathf.SmoothStep(0f, 1f, (0.5f - stamina) / 0.5f) : 0f;
-        float deepVol = Mathf.Max(low, adr);
+        float deepVol = Mathf.Max(low, Mathf.Max(adr, _kick));
         float noseVol = 1f - Mathf.SmoothStep(0f, 1f, (stamina - 0.5f) / 0.35f);
+        float calmVol = _calmVolume * Mathf.Pow(calm, 0.8f);
 
         State want = State.None;
         if (!alive || HandlingState.IsHoldingBreath) want = State.None;
         else if (sprinting) want = State.Run;
         // Hysteresis around 50% so deep fast and nose do not flip back and forth.
-        else if (adr > 0.05f || stamina < (_state == State.Deep ? 0.5f : 0.45f)) want = State.Deep;
+        else if (heavy || stamina < (_state == State.Deep ? 0.5f : 0.45f)) want = State.Deep;
+        else if (calm > 0f) want = State.CalmNose;
         else if (recovering && stamina < 0.85f) want = State.Nose;
 
         // A new state has to hold for a moment before it takes over (sprint
-        // taps, stamina jitter); holding breath and death cut in at once.
+        // taps, stamina jitter); holding breath, death and a fresh trigger
+        // during the calm-down cut in at once.
         if (want != _pending) { _pending = want; _pendingSince = Time.time; }
-        bool instant = want == State.None && (!alive || HandlingState.IsHoldingBreath);
+        bool instant = want == State.None && (!alive || HandlingState.IsHoldingBreath)
+            || want == State.Deep && _state == State.CalmNose && _kick > 0.1f;
         if (want != _state && (instant || Time.time - _pendingSince >= 0.4f))
         {
-            Log.Info($"Breathing: {_state} -> {want} (stamina {stamina:0.00}, adrenaline {_adrenaline:0.00}, sprint {sprinting}, recovering {recovering}, volume {master:0.00})");
+            Log.Info($"Breathing: {_state} -> {want} after {Time.time - _stateSince:0.0}s (stamina {stamina:0.00}, adrenaline {_adrenaline:0.00}, calm-down left {_calmLeft:0.0}s, sprint {sprinting}, recovering {recovering}, volume {master:0.00})");
             _state = want;
+            _stateSince = Time.time;
         }
 
         float run = _state == State.Run ? runVol : 0f;
         float deep = _state == State.Deep ? deepVol : 0f;
-        float nose = _state == State.Nose ? noseVol : 0f;
+        float nose = _state == State.Nose ? noseVol
+            : _state == State.CalmNose ? Mathf.Max(calmVol, recovering && stamina < 0.85f ? noseVol : 0f) : 0f;
+        // The calm-down nose loop plays a little quick at first and slows as you settle.
+        float pitch = _state == State.CalmNose ? Mathf.Lerp(0.95f, 1.06f, calmPace) : 1f;
+        Nose.Pitch = Mathf.MoveTowards(Nose.Pitch, pitch, dt * 0.1f);
 
         if (master <= 0f || !alive)
         {
@@ -156,14 +238,29 @@ internal static class BreathingSystem
 
         bool hold = HandlingState.IsHoldingBreath;
         Drive(Running, run, master, dt, hold);
-        Drive(DeepFast, deep, master, dt, hold);
-        Drive(Nose, nose, master, dt, hold);
+        bool handover = _state == State.CalmNose;
+        Drive(DeepFast, deep, master, dt, hold, handover);
+        Drive(Nose, nose, master, dt, hold, handover);
     }
 
-    private static void Drive(Layer l, float target, float master, float dt, bool fast)
+    private static void StartCalm(float fatigue)
     {
-        // A layer that lost the state fades out quickly so the crossfade is short.
-        float time = fast ? 0.15f : target > l.Volume ? l.FadeIn : target <= 0f ? 0.7f : l.FadeOut;
+        float len = HandlingConfig.CalmDownLength?.Value ?? 20f;
+        _calmIntensity = Intensity;
+        _calmTotal = _calmLeft = len * (0.15f + 0.85f * _calmIntensity) * (1f + 0.5f * fatigue);
+        _calmVolume = (HandlingConfig.CalmDownVolume?.Value ?? 0.6f) * Mathf.Lerp(0.55f, 1f, _calmIntensity);
+        _calmSince = Time.time;
+        Log.Info($"Breathing: heavy for {Time.time - _heavySince:0.0}s, handing over to calm-down nose breathing for ~{_calmTotal:0.0}s (adrenaline load {_load:0.0}, peak {_peak:0.00}, intensity {_calmIntensity:0.00}, fatigue {fatigue:0.00}, nose volume {_calmVolume:0.00})");
+    }
+
+    private static void Drive(Layer l, float target, float master, float dt, bool fast, bool handover = false)
+    {
+        // A layer that lost the state fades out quickly so the crossfade is
+        // short, except at the handover from heavy breathing to the calm-down,
+        // where both fade slowly into each other.
+        float time = fast ? 0.15f
+            : handover && (target <= 0f || target > l.Volume) ? 5f
+            : target > l.Volume ? l.FadeIn : target <= 0f ? 0.7f : l.FadeOut;
         l.Volume = Mathf.MoveTowards(l.Volume, Mathf.Clamp01(target), dt / Mathf.Max(0.05f, time));
 
         if (l.Volume <= 0.001f)
@@ -185,7 +282,8 @@ internal static class BreathingSystem
             }
             // Start somewhere random in the loop so it never sounds like the same take.
             l.Source.time = UnityEngine.Random.Range(0f, l.Clip.length * 0.9f);
-            l.Source.pitch = UnityEngine.Random.Range(0.97f, 1.03f);
+            l.PitchBase = UnityEngine.Random.Range(0.97f, 1.03f);
+            l.Source.pitch = l.PitchBase * l.Pitch;
             l.Source.volume = Mathf.Clamp01(master * l.Gain * l.Volume);
             l.Source.Play();
             if (l.Source.isPlaying)
@@ -201,6 +299,7 @@ internal static class BreathingSystem
             }
         }
         l.Source.volume = Mathf.Clamp01(master * l.Gain * l.Volume);
+        l.Source.pitch = l.PitchBase * l.Pitch;
     }
 
     private static bool AnyPlaying()
@@ -308,7 +407,7 @@ internal static class BreathingSystem
         }
     }
 
-    private static string FindAudioDir()
+    internal static string FindAudioDir()
     {
         string dll = Path.GetDirectoryName(typeof(BreathingSystem).Assembly.Location) ?? "";
         foreach (string d in new[] { Path.Combine(dll, "TrueView", "audio"), Path.Combine(dll, "audio") })
@@ -352,45 +451,16 @@ internal static class BreathingSystem
 
     private static float[] LoadLoop(string path, float start, float end, out int sampleRate)
     {
-        byte[] b = File.ReadAllBytes(path);
-        if (b.Length < 44 || b[0] != 'R' || b[8] != 'W') throw new InvalidDataException($"{Path.GetFileName(path)} is not a WAV file");
-        int channels = 0, rate = 0, bits = 0, dataPos = -1, dataLen = 0;
-        for (int i = 12; i + 8 <= b.Length;)
-        {
-            string id = System.Text.Encoding.ASCII.GetString(b, i, 4);
-            int size = BitConverter.ToInt32(b, i + 4);
-            if (id == "fmt ")
-            {
-                channels = BitConverter.ToInt16(b, i + 10);
-                rate = BitConverter.ToInt32(b, i + 12);
-                bits = BitConverter.ToInt16(b, i + 22);
-            }
-            else if (id == "data")
-            {
-                dataPos = i + 8;
-                dataLen = Math.Min(size, b.Length - dataPos);
-                break;
-            }
-            i += 8 + size + (size & 1);
-        }
-        if (dataPos < 0 || bits != 16 || channels < 1) throw new InvalidDataException($"{Path.GetFileName(path)}: need 16-bit PCM");
-
-        int frames = dataLen / (2 * channels);
-        int s0 = Mathf.Clamp((int)(start * rate), 0, frames);
-        int s1 = Mathf.Clamp((int)(end * rate), s0, frames);
+        float[] all = WavFile.ReadMono(path, out int rate);
+        int s0 = Mathf.Clamp((int)(start * rate), 0, all.Length);
+        int s1 = Mathf.Clamp((int)(end * rate), s0, all.Length);
         int n = s1 - s0;
         int fade = Mathf.Min((int)(0.4f * rate), n / 4);
         int len = n - fade;
         if (len < rate / 2) throw new InvalidDataException($"{Path.GetFileName(path)} is too short");
 
         var mono = new float[n];
-        for (int f = 0; f < n; f++)
-        {
-            float sum = 0f;
-            int p = dataPos + (s0 + f) * 2 * channels;
-            for (int c = 0; c < channels; c++) sum += BitConverter.ToInt16(b, p + c * 2) / 32768f;
-            mono[f] = sum / channels;
-        }
+        Array.Copy(all, s0, mono, 0, n);
 
         // Loop: the last `fade` samples are blended into the first ones.
         var data = new float[len];
@@ -418,6 +488,10 @@ internal static class BreathingSystem
         _lastStamina = -1f;
         _staminaRate = 0f;
         _recoveringUntil = 0f;
+        _lastLevel = _kick = _load = _peak = 0f;
+        _heavy = false;
+        _calmLeft = _calmTotal = 0f;
+        Nose.Pitch = 1f;
         _state = _pending = State.None;
         Depth = 0f;
         StopAll();

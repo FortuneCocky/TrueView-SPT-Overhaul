@@ -63,6 +63,7 @@ internal sealed class StuckDrops
     }
 
     public int Capacity => _d.Length;
+    public int LiveCount => _live;
 
     public void Resize(int capacity)
     {
@@ -214,7 +215,7 @@ internal sealed class StuckDrops
 
     private static Color Shade(Color c, float diffuse, float spec)
     {
-        return new Color(c.r * diffuse + spec * 0.5f, c.g * diffuse + spec * 0.25f, c.b * diffuse + spec * 0.25f, 1f);
+        return Wet.Shade(c, diffuse, spec);
     }
 
     private void Collapse(int i)
