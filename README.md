@@ -2,7 +2,7 @@
 
 **One pack that makes Tarkov feel physical.** Your gun has weight and lags behind your aim, your body moves like a person's, your eyes focus like eyes, and every hit bleeds in full 3D.
 
-TrueView bundles five client mods that are built to work together:
+TrueView bundles client mods that are built to work together:
 
 | Mod | What it does |
 |---|---|
@@ -10,7 +10,9 @@ TrueView bundles five client mods that are built to work together:
 | **Tactical Stances** | Low ready, high ready, active aim, canted aim and shoulder swap |
 | **Dynamic DoF** | Eye-like depth of field that focuses on whatever you look at |
 | **BloodFX** | Fully volumetric blood: spurts, drips, trails, pools, wounds and armor impacts |
-| **Euphoria Reactions** | Physics-driven hit reactions: bots stagger, catch themselves, buckle, fall and get back up |
+| **Euphoria Reactions** *(coming soon)* | Physics-driven hit reactions: bots stagger, catch themselves, buckle, fall and get back up |
+
+> **Euphoria Reactions isn't in the release zip yet.** Its physics body is being rebuilt from Tarkov's own ragdoll so it needs no outside game data. Its source is here; it will ship in a later release.
 
 Each one has its own config file. Turn any of them off or tune it however you like.
 
@@ -112,7 +114,7 @@ Blood that is actual 3D geometry, not flat sprites. Every drop collides with the
 
 ---
 
-## 💥 Euphoria Reactions
+## 💥 Euphoria Reactions *(coming soon)*
 
 Bots react to being shot with their whole body, driven by a real-time physics simulation instead of canned animations. The bullet's push lands where it hit, the body's muscles and balance fight it, and what happens next is different every time.
 
@@ -157,14 +159,13 @@ Bots react to being shot with their whole body, driven by a real-time physics si
    - `BepInEx/config/com.devin.tacticalstances.cfg`
    - `BepInEx/config/com.dynamicdof.prism.cfg`
    - `BepInEx/config/com.irl.bloodfx.cfg`
-   - `BepInEx/config/com.euphoria.reaction.cfg`
 
 Every setting can also be changed in game through the **BepInEx Configuration Manager (F12)**.
 
 ## ✅ Compatibility
 
 - **SPT 4.1.x**, client only. No server mod needed.
-- All five mods are designed to stack. Tactical Stances layers on top of TrueView's weapon motion, and Dynamic DoF keeps your sights sharp while TrueView moves the gun.
+- All the mods are designed to stack. Tactical Stances layers on top of TrueView's weapon motion, and Dynamic DoF keeps your sights sharp while TrueView moves the gun.
 - Other weapon-handling or procedural-animation mods will likely conflict with TrueView and Tactical Stances.
 - Other hit-reaction or ragdoll mods will likely conflict with Euphoria Reactions.
 - Other blood or gore mods can run alongside BloodFX, but you'll get two sets of blood. Turn one of them off for the cleanest look.
@@ -185,12 +186,12 @@ Each mod is its own project in this repo:
 2. Point the `SPTDir` (or `SPT_INSTALL_DIR`) property in each `.csproj` at your SPT folder. The game and BepInEx assemblies are referenced from there and are not included here.
 3. Run `dotnet build -c Release` in a mod's folder, or its `build_*.bat`, which also copies the DLL into your SPT plugins folder.
 
-Euphoria Reactions also needs `delirium_physics.dll` from the [Delirium physics engine](https://github.com/YoucefNabil/delirium-physics) and its animation data files next to the DLL. These ship in the release zip, not in this repo.
+Euphoria Reactions also needs `delirium_physics.dll` from the [Delirium physics engine](https://github.com/YoucefNabil/delirium-physics) and its character and animation data files next to the DLL. It is still in development and not in the release zip yet.
 
 ## 🙏 Credits
 
 - **adishee**: author of [TarkovIRL](https://forge.sp-tarkov.com/mod/1459/tarkovirl-weapons-handling-mod). TrueView's weapon deadzone system and several handling ideas come from TarkovIRL. Full credit for the original work.
-- **YoucefNabil**: author of the [Delirium physics engine](https://github.com/YoucefNabil/delirium-physics), which Euphoria Reactions runs on (`delirium_physics.dll`, GPL-3.0, included under its own license).
+- **YoucefNabil**: author of the [Delirium physics engine](https://github.com/YoucefNabil/delirium-physics), which Euphoria Reactions runs on (`delirium_physics.dll`, GPL-3.0, under its own license).
 - **Get-up animations** generated with NVIDIA MotionBricks.
 - **Audio Library: Sound Effects** ([YouTube](https://www.youtube.com/@AudioLibrarySoundEffects)): breathing recordings.
 - **SPT team**, **BepInEx**, **HarmonyX**.
@@ -198,5 +199,5 @@ Euphoria Reactions also needs `delirium_physics.dll` from the [Delirium physics 
 ## 📜 License
 
 Free for personal use. **Modification and redistribution require written permission.**
-The bundled Delirium physics engine (`delirium_physics.dll`) is not covered by this license; it stays under GPL-3.0, with its source at the link above.
+The Delirium physics engine (`delirium_physics.dll`) is not covered by this license; it stays under GPL-3.0, with its source at the link above.
 Contact: Discord `Isaiahnohart`.
