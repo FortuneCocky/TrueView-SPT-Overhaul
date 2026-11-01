@@ -14,6 +14,7 @@ internal static class SwaySystem
 
 	public static void Apply()
 	{
+		StanceOverhaulCompat.EnsureInit();
 		if (HandlingConfig.SwayEnabled.Value && HandlingState.HasWeapon)
 		{
 			ProceduralWeaponAnimation animation = HandlingState.Animation;
@@ -28,7 +29,9 @@ internal static class SwaySystem
 			if (animation.Breath != null)
 			{
 				animation.Breath.Intensity = animation.IntensityByPoseLevel * animation.IntensityByAiming * num3;
-				animation.Breath.HipPenalty = HandlingConfig.HipSwayMultiplier.Value * (1f + 0.5f * weightProgress);
+				// Stance Overhaul balances hip sway per stance through this value.
+				if (!StanceOverhaulCompat.Installed)
+					animation.Breath.HipPenalty = HandlingConfig.HipSwayMultiplier.Value * (1f + 0.5f * weightProgress);
 			}
 			if (animation.MotionReact != null)
 			{

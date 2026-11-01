@@ -179,6 +179,7 @@ Every setting can also be changed in game through the **BepInEx Configuration Ma
 
 - **SPT 4.1.x**, client only. No server mod needed.
 - All the mods are designed to stack. Tactical Stances layers on top of TrueView's weapon motion, and Dynamic DoF keeps your sights sharp while TrueView moves the gun.
+- **Fontaine's [SPT Stance Overhaul](https://sp-mod.com/mod/3136/spt-stance-overhaul)** works with TrueView (it needs Fontaine's Realism common lib). While you hold one of its stances at hip, TrueView hands the gun to the stance and takes it back when the stance ends; aiming down sights stays TrueView's. Pick either Stance Overhaul or Tactical Stances, not both: two stance mods will fight over the gun.
 - Other weapon-handling or procedural-animation mods will likely conflict with TrueView and Tactical Stances.
 - Other hit-reaction or ragdoll mods will likely conflict with Euphoria Reactions.
 - Other blood or gore mods can run alongside BloodFX, but you'll get two sets of blood. Turn one of them off for the cleanest look.

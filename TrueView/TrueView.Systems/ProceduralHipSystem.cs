@@ -42,6 +42,7 @@ internal static class ProceduralHipSystem
 
     // Sprint blend: 0 = full hip deadzone, 1 = full sprint (no deadzone).
     private static float _sprintBlend;
+    private static Player _stancePlayer;
     private static float _sprintVelocity;
 
     // --- Natural motion state ---
@@ -352,8 +353,24 @@ internal static class ProceduralHipSystem
                 _adsLift = 1f;
         }
 
-        // Smoothly blend sprint state instead of hard reset.
-        float sprintTarget = HandlingState.IsSprinting ? 1f : 0f;
+        // Stance Overhaul: its left-shoulder stance swaps shoulders without the
+        // game's own swap, so start fresh like HandlingManager does for that.
+        StanceOverhaulCompat.EnsureInit();
+        if (StanceOverhaulCompat.Installed)
+        {
+            if (player != _stancePlayer)
+            {
+                _stancePlayer = player;
+                StanceOverhaulCompat.Clear();
+            }
+            if (StanceOverhaulCompat.ConsumeShoulderSwap())
+                Reset();
+        }
+
+        // Smoothly blend sprint state instead of hard reset. A Stance Overhaul
+        // stance at hip blends out the same way, so the stance owns the gun.
+        bool stanceOwned = StanceOverhaulCompat.HandsOwned && !isAiming;
+        float sprintTarget = HandlingState.IsSprinting || stanceOwned ? 1f : 0f;
         float dt = Mathf.Min(deltaTime, 0.05f);
         // Tracking Slerps use the real frame time (capped for sanity) —
         // Slerp can't overshoot, and using the clamped spring dt makes the
