@@ -5,8 +5,8 @@ using System.Runtime.Versioning;
 
 [assembly: AssemblyCompany("TrueView")]
 [assembly: AssemblyConfiguration("Release")]
-[assembly: AssemblyFileVersion("2.1.1.0")]
-[assembly: AssemblyInformationalVersion("2.1.1")]
+[assembly: AssemblyFileVersion("2.1.2.0")]
+[assembly: AssemblyInformationalVersion("2.1.2")]
 [assembly: AssemblyProduct("TrueView")]
 [assembly: AssemblyTitle("TrueView")]
-[assembly: AssemblyVersion("2.1.1.0")]
+[assembly: AssemblyVersion("2.1.2.0")]
