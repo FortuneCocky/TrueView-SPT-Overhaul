@@ -33,8 +33,15 @@ internal class Patch_CalculateCameraPosition : ModulePatch
         }
         _lastFrame = Time.frameCount;
 
-        // Skip weapon offset during free look — let vanilla handle it
-        if (player.MouseLookControl)
+        // TrueView switched off: vanilla owns the camera and the weapon.
+        if (!HandlingState.Enabled)
+        {
+            return;
+        }
+
+        // Skip weapon offset during free look and its return to centre —
+        // let vanilla handle it
+        if (HandlingManager.InFreeLook(player))
         {
             return;
         }
@@ -49,7 +56,8 @@ internal class Patch_CalculateCameraPosition : ModulePatch
 
         if (__instance.HandsContainer?.CameraTransform != null)
         {
-            __instance.HandsContainer.CameraTransform.localRotation = Quaternion.Euler(HandlingState.HeadRotation);
+            // Keep the game's recoil from the last camera update on top.
+            __instance.HandsContainer.CameraTransform.localRotation = Quaternion.Euler(HandlingState.HeadRotation) * Patch_LerpCamera.RecoilDelta;
         }
 
         // Apply the shared procedural weapon offset (weapon rotation relative

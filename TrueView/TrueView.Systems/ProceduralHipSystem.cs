@@ -29,6 +29,16 @@ internal static class ProceduralHipSystem
     private static bool _handsTransitionActive;
     private static bool _recoilReturnActive;
     private static Quaternion _recoilAnchor = Quaternion.identity;
+    // Return-to-center strength this tick (1 = full centering).
+    private static float _centering = 1f;
+    // Camera settle: after firing with free aim, the view turns to the gun.
+    private static bool _cameraSettlePending;
+    private static bool _cameraSettleActive;
+    private static float _cameraSettleEnd;
+    private static float _cameraSettleLast;
+    private static float _cameraSettleTurned;
+    private static float _cameraSettleGoal;
+    private const float CameraSettleDuration = 3f;
 
     // Sprint blend: 0 = full hip deadzone, 1 = full sprint (no deadzone).
     private static float _sprintBlend;
@@ -170,6 +180,66 @@ internal static class ProceduralHipSystem
         ControlAngle = Quaternion.Angle(_cameraRot, _weaponRot);
     }
 
+    /// <summary>A shot was fired: once it settles, the camera may turn to the gun.</summary>
+    public static void NotifyShot()
+    {
+        if (_initialized)
+            _cameraSettlePending = true;
+    }
+
+    /// <summary>
+    /// Turns the player's view toward where the gun points and takes the same
+    /// angle off the gun's offset, so the gun keeps its aim in the world while
+    /// it comes back to the natural hold. The turn is reported to
+    /// MotionTracker so it isn't mistaken for mouse input.
+    /// </summary>
+    private static void SettleCameraToGun(Player player, Quaternion target, float speed, float dt)
+    {
+        Vector3 off = (_weaponRot * Quaternion.Inverse(target)).eulerAngles;
+        float yaw = Mathf.DeltaAngle(0f, off.y);
+        float pitch = Mathf.DeltaAngle(0f, off.x);
+        float remaining = new Vector2(yaw, pitch).magnitude;
+        // A correction, not a snap: only part of the offset is taken back (the
+        // rest stays as the arms' natural hold), at a gentle pace that eases in.
+        if (_cameraSettleLast == float.MaxValue)
+            _cameraSettleGoal = remaining * (1f - Mathf.Clamp01(HandlingConfig.CameraSettleAmount?.Value ?? 0.5f));
+        float excess = remaining - _cameraSettleGoal;
+        // Done, timed out, or the offset grew (you moved the mouse, or the
+        // view turned the wrong way): stop and leave the aim to you.
+        if (excess < 0.1f || Time.unscaledTime > _cameraSettleEnd || remaining > _cameraSettleLast + 0.5f)
+        {
+            if (remaining > _cameraSettleLast + 0.5f)
+                Utilities.Log.Info($"Camera settle handed back: gun offset grew to {remaining:F1} deg (mouse input)");
+            else
+                Utilities.Log.Info($"Camera settle: view turned {_cameraSettleTurned:F1} deg toward the gun in {CameraSettleDuration - (_cameraSettleEnd - Time.unscaledTime):F2}s, {remaining:F1} deg left as the natural hold");
+            _cameraSettleActive = false;
+            return;
+        }
+        _cameraSettleLast = remaining;
+
+        float elapsed = CameraSettleDuration - (_cameraSettleEnd - Time.unscaledTime);
+        float easeIn = Mathf.SmoothStep(0f, 1f, elapsed / 0.3f);
+        float pace = Mathf.Clamp(speed * 0.3f, 1.5f, 4f);
+        float t = (1f - Mathf.Exp(-pace * dt)) * easeIn * (excess / remaining);
+        Vector2 before = player.Rotation;
+        player.Rotate(new Vector2(yaw * t, pitch * t));
+        Vector2 after = player.Rotation;
+        Vector2 applied = new(Mathf.DeltaAngle(before.x, after.x), after.y - before.y);
+        if (applied.sqrMagnitude < 1e-8f)
+            return;
+        MotionTracker.AddSelfRotation(applied);
+        _cameraSettleTurned += applied.magnitude;
+
+        _weaponRot = Quaternion.Euler(pitch - applied.y, yaw - applied.x, 0f) * target;
+        if (_recoilReturnActive)
+        {
+            Vector3 a = (_recoilAnchor * Quaternion.Inverse(target)).eulerAngles;
+            _recoilAnchor = Quaternion.Euler(
+                Mathf.DeltaAngle(0f, a.x) - applied.y,
+                Mathf.DeltaAngle(0f, a.y) - applied.x, 0f) * target;
+        }
+    }
+
     public static void AddImpulse(float yaw, float pitch)
     {
         if (!_initialized)
@@ -189,7 +259,7 @@ internal static class ProceduralHipSystem
     /// </summary>
     public static void AddHandKick(float strength)
     {
-        float s = strength * (HandlingConfig.HandKick?.Value ?? 0f);
+        float s = strength * HandlingConfig.HandKickScale;
         if (!_initialized || s <= 0f)
             return;
         // Impulse = peak * omega / 0.53 (first-peak factor at zeta 0.55).
@@ -329,23 +399,31 @@ internal static class ProceduralHipSystem
         bool lazyPhysics = HandlingConfig.LazyPhysicsEnabled?.Value == true
             && !isAiming;
 
+        // Return to center — scales the pull toward the camera; at 0 the gun
+        // holds its world aim and only the cone edge drags it. Hip and ADS
+        // have their own settings; sprint blends centering back in.
+        float centering = Mathf.Lerp(isAiming
+            ? HandlingConfig.AdsReturnToCenter?.Value ?? 1f
+            : HandlingConfig.HipReturnToCenter?.Value ?? 1f, 1f, _sprintBlend);
+        _centering = centering;
+
         if (_recoilReturnActive)
         {
-            _recoilAnchor = Quaternion.Slerp(_recoilAnchor, target, weaponFollowT);
+            _recoilAnchor = Quaternion.Slerp(_recoilAnchor, target, weaponFollowT * centering);
             float velDecay = Mathf.Exp(-8f * trackDt);
             _lazyYawVel *= velDecay;
             _lazyPitchVel *= velDecay;
         }
         else if (lazyPhysics)
         {
-            IntegrateLazyRotation(target, weaponFollowSpeed, deltaTime, stats.WeightProgress);
+            IntegrateLazyRotation(target, weaponFollowSpeed, deltaTime, stats.WeightProgress, centering);
         }
         else
         {
             float velDecay = Mathf.Exp(-10f * trackDt);
             _lazyYawVel *= velDecay;
             _lazyPitchVel *= velDecay;
-            _weaponRot = Quaternion.Slerp(_weaponRot, target, weaponFollowT);
+            _weaponRot = Quaternion.Slerp(_weaponRot, target, weaponFollowT * centering);
         }
 
         float deadzoneInfluence = (isAiming
@@ -389,6 +467,27 @@ internal static class ProceduralHipSystem
             float restraintT = 1f - Mathf.Exp(-18f * Mathf.Min(deltaTime, 1f / 30f));
             _weaponRot = Quaternion.Slerp(_weaponRot, target, excessT * restraintT);
         }
+        // Vertical follow — hip only: a tighter limit on up/down lag so looking
+        // up or down doesn't leave the gun parked low in the frame. Left and
+        // right keep the full cone.
+        float pitchLimit = isAiming ? float.MaxValue
+            : EffectiveZoneDegrees(HandlingConfig.HipVerticalFollow?.Value ?? 5.5f);
+        if (pitchLimit < maxWeaponLag)
+        {
+            float restraintT = 1f - Mathf.Exp(-18f * Mathf.Min(deltaTime, 1f / 30f));
+            _weaponRot = LimitPitch(_weaponRot, target, pitchLimit, restraintT);
+        }
+        // Without full centering the recoil anchor no longer chases the camera,
+        // so keep it inside the cone too — the gun settles back to its pre-shot
+        // aim, or to the cone edge if the turn has carried past it.
+        if (_recoilReturnActive && centering < 1f)
+        {
+            float anchorLag = Quaternion.Angle(_recoilAnchor, target);
+            if (anchorLag > maxWeaponLag)
+                _recoilAnchor = Quaternion.Slerp(_recoilAnchor, target, (anchorLag - maxWeaponLag) / anchorLag);
+            if (pitchLimit < maxWeaponLag)
+                _recoilAnchor = LimitPitch(_recoilAnchor, target, pitchLimit, 1f);
+        }
 
         if (_recoilReturnActive)
         {
@@ -403,6 +502,17 @@ internal static class ProceduralHipSystem
                 _recoilReturnActive = false;
             }
         }
+
+        if (_cameraSettlePending && !ShotSystem.InShotRecovery)
+        {
+            _cameraSettlePending = false;
+            _cameraSettleActive = centering < 1f && HandlingConfig.CameraSettleAfterFiring?.Value == true;
+            _cameraSettleEnd = Time.unscaledTime + CameraSettleDuration;
+            _cameraSettleLast = float.MaxValue;
+            _cameraSettleTurned = 0f;
+        }
+        if (_cameraSettleActive)
+            SettleCameraToGun(player, target, weaponFollowSpeed, trackDt);
 
         UpdateControlOffset();
 
@@ -436,6 +546,37 @@ internal static class ProceduralHipSystem
         // --- Cache the weapon offset quaternion (computed once per tick) ---
         CacheWeaponOffset();
         UpdateFireDirection(player);
+        LogFreeAimState(isAiming);
+    }
+
+    // Diagnostic for free aim (return to center below 1): every half second
+    // while the gun sits off center or a recoil return is running, log which
+    // value is holding it there.
+    private static float _nextFreeAimLog;
+
+    // Pulls the up/down part of a rotation's offset from the camera back
+    // toward the limit by t (1 = straight to it), leaving yaw alone.
+    private static Quaternion LimitPitch(Quaternion rot, Quaternion target, float limit, float t)
+    {
+        Vector3 off = (rot * Quaternion.Inverse(target)).eulerAngles;
+        float pitch = Mathf.DeltaAngle(0f, off.x);
+        float excess = Mathf.Abs(pitch) - limit;
+        if (excess <= 0f)
+            return rot;
+        return Quaternion.Euler(pitch - Mathf.Sign(pitch) * excess * t, off.y, off.z) * target;
+    }
+
+    private static void LogFreeAimState(bool isAiming)
+    {
+        if (_centering >= 1f || Time.unscaledTime < _nextFreeAimLog)
+            return;
+        Vector3 drawn = _cachedWeaponOffset.eulerAngles;
+        float drawnAngle = Quaternion.Angle(Quaternion.identity, _cachedWeaponOffset);
+        if (ControlAngle < 3f && drawnAngle < 5f && !_recoilReturnActive)
+            return;
+        _nextFreeAimLog = Time.unscaledTime + 0.5f;
+        Vector3 anchor = (_recoilAnchor * Quaternion.Inverse(_cameraRot)).eulerAngles;
+        Utilities.Log.Verbose($"Free aim: {(isAiming ? "ADS" : "hip")} centering {_centering:F2}, base yaw {ControlOffset.x:F1} pitch {ControlOffset.y:F1}, drawn yaw {Mathf.DeltaAngle(0f, drawn.y):F1} pitch {Mathf.DeltaAngle(0f, drawn.x):F1} roll {Mathf.DeltaAngle(0f, drawn.z):F1}, pos {_cachedWeaponPosOffset * 100f:F1}cm, zone {_zoneDeg:F1}, recoil return {_recoilReturnActive} (anchor yaw {Mathf.DeltaAngle(0f, anchor.y):F1} pitch {Mathf.DeltaAngle(0f, anchor.x):F1}, shot settling {ShotSystem.InShotRecovery}), hands anim {Time.unscaledTime < _cameraSuppressUntil}, lead {_leadYaw:F1}, bend {_bendYaw:F1}, whip {_whipOffset.x:F1}/{_whipOffset.y:F1}, kick {_kickRot.x:F1}, lazy vel {_lazyYawVel:F0}/{_lazyPitchVel:F0}, turn {MotionTracker.YawRate:F0}/{MotionTracker.PitchRate:F0} deg/s, sprint {_sprintBlend:F2}");
     }
 
     /// <summary>
@@ -445,7 +586,7 @@ internal static class ProceduralHipSystem
     /// </summary>
     private static void CacheWeaponOffset()
     {
-        if (!_initialized)
+        if (!_initialized || (_centering < 1f && Time.unscaledTime < _cameraSuppressUntil))
         {
             _cachedWeaponOffset = Quaternion.identity;
             _cachedWeaponPosOffset = Vector3.zero;
@@ -641,7 +782,7 @@ internal static class ProceduralHipSystem
     /// reuses the existing follow-speed chain so weight, ergonomics, gait,
     /// injury and fatigue scaling all still apply.
     /// </summary>
-    private static void IntegrateLazyRotation(Quaternion target, float speed, float deltaTime, float weightProgress)
+    private static void IntegrateLazyRotation(Quaternion target, float speed, float deltaTime, float weightProgress, float centering)
     {
         float sdt = Mathf.Min(deltaTime, 1f / 90f);
         float w = Mathf.Clamp01(weightProgress) * HandlingConfig.LazyWeightInfluence.Value;
@@ -668,11 +809,13 @@ internal static class ProceduralHipSystem
         {
             _lazyYawVel = 0f;
             _lazyPitchVel = 0f;
-            _weaponRot = Quaternion.Slerp(_weaponRot, target, 1f - Mathf.Exp(-speed * sdt));
+            _weaponRot = Quaternion.Slerp(_weaponRot, target, 1f - Mathf.Exp(-speed * centering * sdt));
             return;
         }
 
-        float k = omega * omega;
+        // Return to center scales only the pull; damping stays, so at 0 the
+        // gun coasts to a stop wherever it is instead of springing back.
+        float k = omega * omega * centering;
         float c = 2f * zeta * omega;
 
         // Overshoot-crossing damping: when the error flips sign while the
@@ -1049,9 +1192,15 @@ internal static class ProceduralHipSystem
         _cameraRot = rawCamera;
         if (Time.unscaledTime < _cameraSuppressUntil)
         {
-            _weaponRot = rawCamera;
-            _recoilAnchor = rawCamera;
-            _recoilReturnActive = false;
+            // Below full centering the gun keeps its deadzone aim through
+            // reloads and other hand animations: only the drawn offset is
+            // dropped while they play, so it returns to where it was.
+            if (_centering >= 1f)
+            {
+                _weaponRot = rawCamera;
+                _recoilAnchor = rawCamera;
+                _recoilReturnActive = false;
+            }
             _lazyYawVel = 0f;
             _lazyPitchVel = 0f;
             _cachedWeaponOffset = Quaternion.identity;
@@ -1094,6 +1243,8 @@ internal static class ProceduralHipSystem
         _cameraRot = Quaternion.identity;
         _recoilAnchor = Quaternion.identity;
         _recoilReturnActive = false;
+        _cameraSettlePending = false;
+        _cameraSettleActive = false;
         _lastAiming = false;
         _initialized = false;
         _sprintBlend = 0f;

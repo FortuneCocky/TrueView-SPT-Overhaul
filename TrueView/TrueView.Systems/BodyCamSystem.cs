@@ -65,8 +65,6 @@ internal static class BodyCamSystem
     // --- Shot jolt ---
     private static Vector3 _jolt;
     private static Vector3 _joltVel;
-    private static Vector3 _joltPos;
-    private static Vector3 _joltPosVel;
     private static int _shotCount;
 
     // --- Knock: hits and flyby flinches ---
@@ -86,7 +84,7 @@ internal static class BodyCamSystem
     {
         if (HandlingConfig.BodyCamEnabled?.Value != true)
             return;
-        float s = kick * (HandlingConfig.BodyCamShotJolt?.Value ?? 1f);
+        float s = kick * HandlingConfig.ShotJoltScale;
         if (s <= 0f)
             return;
 
@@ -97,13 +95,6 @@ internal static class BodyCamSystem
             -1.6f * Random.Range(0.8f, 1.2f),
             Random.Range(-0.5f, 0.5f),
             side * Random.Range(0.4f, 1f)) * (JoltGain * s);
-
-        // Muzzle jolt: the chest is shoved straight back a few millimetres.
-        if (HandlingConfig.MuzzleJoltEnabled?.Value == true)
-        {
-            float jolt = HandlingConfig.MuzzleJoltAmount?.Value ?? 1f;
-            _joltPosVel += new Vector3(0f, 0.0015f, -0.006f) * (JoltGain * s * jolt);
-        }
     }
 
     private static void AddKnock(Vector3 euler)
@@ -185,12 +176,8 @@ internal static class BodyCamSystem
         int n = Mathf.CeilToInt(dt / (1f / 240f));
         float h = dt / n;
         for (int i = 0; i < n; i++)
-        {
             Spring(ref _jolt, ref _joltVel, JoltOmega, JoltZeta, h);
-            Spring(ref _joltPos, ref _joltPosVel, JoltOmega, JoltZeta, h);
-        }
         _jolt = ClampEuler(_jolt, 3f, 3f);
-        _joltPos = Vector3.ClampMagnitude(_joltPos, 0.015f);
 
         // Knock — near-critical, softer the smaller it is.
         float recovery = 10f;
@@ -223,7 +210,7 @@ internal static class BodyCamSystem
 
         Vector3 body = new Vector3(_lag.y + breathPitch, _lag.x, mountRoll) + _stepRot + _stepWander;
         Vector3 euler = (body + _jolt) * bodyScale + _knock + _injuryDrift;
-        Vector3 pos = (_stepPos + breathPos + _joltPos) * bodyScale + _knockPos;
+        Vector3 pos = (_stepPos + breathPos) * bodyScale + _knockPos;
 
         _euler = ClampEuler(euler, MaxPitchYaw, MaxRoll);
         _pos = Vector3.ClampMagnitude(pos, MaxPosition);
@@ -397,8 +384,6 @@ internal static class BodyCamSystem
         _legRoll = 0f;
         _jolt = Vector3.zero;
         _joltVel = Vector3.zero;
-        _joltPos = Vector3.zero;
-        _joltPosVel = Vector3.zero;
         _knock = Vector3.zero;
         _knockVel = Vector3.zero;
         _knockPos = Vector3.zero;

@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-DLL = Path(r"J:\Games\1A-IRLHandling\delirium-phys\target\release\delirium_physics.dll")
+DLL = Path(__file__).resolve().parents[2] / "delirium-phys" / "target" / "release" / "delirium_physics.dll"
 f3 = C.c_float * 3
 f4 = C.c_float * 4
 

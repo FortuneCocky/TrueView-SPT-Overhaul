@@ -33,6 +33,12 @@ internal static class MotionTracker
 
 	public static float TurnRate => new Vector2(_yawRate, _pitchRate).magnitude;
 
+	// View turns TrueView made itself (camera settle after firing). Taken off
+	// the next measured delta so they don't read as mouse input.
+	private static Vector2 _selfRotation;
+
+	public static void AddSelfRotation(Vector2 delta) => _selfRotation += delta;
+
 	public static bool IsMoving { get; private set; }
 
 	public static float NormalizedSpeed { get; private set; }
@@ -64,8 +70,9 @@ internal static class MotionTracker
 		}
 		IsMoving = InputDirection.sqrMagnitude > 0.0001f || NormalizedSpeed > 0.05f;
 		_lastPosition = position;
-		float num = Mathf.DeltaAngle(_lastRotation.x, rotation.x);
-		float num2 = rotation.y - _lastRotation.y;
+		float num = Mathf.DeltaAngle(_lastRotation.x, rotation.x) - _selfRotation.x;
+		float num2 = rotation.y - _lastRotation.y - _selfRotation.y;
+		_selfRotation = Vector2.zero;
 		_lastRotation = rotation;
 		if (Mathf.Abs(num) > 90f)
 		{
@@ -75,16 +82,12 @@ internal static class MotionTracker
 		{
 			num2 = 0f;
 		}
-		if (Systems.ShotSystem.InShotRecovery)
-		{
-			// Recoil also rotates player.Rotation. While a shot's kick is active,
-			// decay the rates instead of feeding the kick into the procedural
-			// motion layers (whip, turn lead, pivot tracking) as fake mouse input.
-			_yawRate = Smooth(_yawRate, 0f, deltaTime, 20f);
-			_pitchRate = Smooth(_pitchRate, 0f, deltaTime, 20f);
-			_yawRateSlow = Smooth(_yawRateSlow, 0f, deltaTime, 20f);
-			return;
-		}
+		// Recoil does not touch player.Rotation in this game version (it only
+		// moves the rendered camera and the hands), so the mouse keeps
+		// driving every motion layer while firing. Zeroing the rates during a
+		// shot froze the torso lag, lead, bend and turn roll, and the view
+		// locked rigidly to the gun until the shot settled.
+		TrackShotWindow(num, num2);
 		float target = Mathf.Clamp(num / rateDt, -720f, 720f);
 		float target2 = Mathf.Clamp(num2 / rateDt, -720f, 720f);
 		_yawRate = Smooth(_yawRate, target, deltaTime, 14f);
@@ -108,6 +111,29 @@ internal static class MotionTracker
 			_lastPosition = player.Position;
 			_hasSample = true;
 		}
+	}
+
+	// One log line per shot window: how far the mouse turned and whether the
+	// motion layers saw it (they used to be frozen to zero while firing).
+	private static bool _shotWindow;
+	private static float _shotTurn;
+	private static float _shotPeakRate;
+
+	private static void TrackShotWindow(float pitchDelta, float yawDelta)
+	{
+		if (Systems.ShotSystem.InShotRecovery)
+		{
+			_shotWindow = true;
+			_shotTurn += new Vector2(pitchDelta, yawDelta).magnitude;
+			_shotPeakRate = Mathf.Max(_shotPeakRate, TurnRate);
+			return;
+		}
+		if (!_shotWindow)
+			return;
+		_shotWindow = false;
+		Utilities.Log.Verbose($"Shot window: mouse turned {_shotTurn:F1} deg, peak turn rate seen {_shotPeakRate:F0} deg/s, aiming {HandlingState.IsAiming}, gun off center {Systems.ProceduralHipSystem.ControlAngle:F1} deg");
+		_shotTurn = 0f;
+		_shotPeakRate = 0f;
 	}
 
 	private static float Smooth(float current, float target, float deltaTime, float speed)

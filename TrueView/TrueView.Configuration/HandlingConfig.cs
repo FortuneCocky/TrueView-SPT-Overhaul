@@ -35,7 +35,6 @@ internal static class HandlingConfig
 
 	public static ConfigEntry<bool> SprintCancelAds { get; private set; }
 
-	public static ConfigEntry<float> FreeLookReturnSpeed { get; private set; }
 
 	public static ConfigEntry<bool> AimingEnabled { get; private set; }
 
@@ -79,6 +78,11 @@ internal static class HandlingConfig
 
 	public static ConfigEntry<float> HipDeadzoneInfluence { get; private set; }
 	public static ConfigEntry<float> HipDeadzoneSmoothing { get; private set; }
+	public static ConfigEntry<float> HipReturnToCenter { get; private set; }
+	public static ConfigEntry<float> AdsReturnToCenter { get; private set; }
+	public static ConfigEntry<bool> CameraSettleAfterFiring { get; private set; }
+	public static ConfigEntry<float> CameraSettleAmount { get; private set; }
+	public static ConfigEntry<float> HipVerticalFollow { get; private set; }
 
 	public static ConfigEntry<float> HipNaturalMotion { get; private set; }
 
@@ -108,6 +112,8 @@ internal static class HandlingConfig
 	public static ConfigEntry<float> ShotBreathPenalty { get; private set; }
 
 	public static ConfigEntry<float> StaminaShotInfluence { get; private set; }
+
+	public static ConfigEntry<bool> DisableTrueViewRecoil { get; private set; }
 
 	public static ConfigEntry<bool> CameraLagEnabled { get; private set; }
 
@@ -178,8 +184,6 @@ internal static class HandlingConfig
 
 	public static ConfigEntry<bool> HitReactionEnabled { get; private set; }
 	public static ConfigEntry<float> HitReactionStrength { get; private set; }
-	public static ConfigEntry<bool> MuzzleJoltEnabled { get; private set; }
-	public static ConfigEntry<float> MuzzleJoltAmount { get; private set; }
 	public static ConfigEntry<bool> FlybyEnabled { get; private set; }
 	public static ConfigEntry<float> FlybyVolume { get; private set; }
 	public static ConfigEntry<float> FlybyFlinchStrength { get; private set; }
@@ -215,6 +219,19 @@ internal static class HandlingConfig
 			new ConfigurationManagerAttributes { IsAdvanced = advanced });
 	}
 
+	// "Disable TrueView recoil": while on, every TrueView per-shot effect is
+	// off whatever its own setting says. Systems read these instead of the
+	// raw entries. The game's own recoil is never touched.
+	private static bool RecoilDisabled => DisableTrueViewRecoil?.Value == true;
+
+	public static float ShotJoltScale => RecoilDisabled ? 0f : BodyCamShotJolt?.Value ?? 1f;
+	public static float HandKickScale => RecoilDisabled ? 0f : HandKick?.Value ?? 0f;
+	public static bool ShotMisalignmentOn => !RecoilDisabled && ShotMisalignmentEnabled.Value;
+	public static float ShotMisalignmentStrengthValue => ShotMisalignmentStrength.Value;
+	public static float ShotMisalignmentMaxValue => ShotMisalignmentMax.Value;
+	public static float ShotBreathPenaltyValue => ShotBreathPenalty.Value;
+	public static float StaminaShotInfluenceValue => StaminaShotInfluence.Value;
+
 	public static void Init(ConfigFile config)
 	{
 		// framework drive footsteps, landing, leans and per-shot recoil ---
@@ -223,12 +240,11 @@ internal static class HandlingConfig
 		Enabled = config.Bind("01 - General", "Enable mod", true, Toggle("Master switch. When off, all handling systems leave the vanilla values untouched."));
 		VerboseLogging = config.Bind("01 - General", "Verbose logging", false, "Log recalculated weapon handling values to the BepInEx console.");
 		SprintCancelAds = config.Bind("01 - General", "Cancel sprint to ADS on right click", true, "Pressing right mouse while sprinting cancels sprint and immediately aims down sights.");
-		FreeLookReturnSpeed = config.Bind("01 - General", "Free look return speed", 12f, D("How fast the camera smoothly returns to forward view after exiting free look. Higher = snappier, lower = smoother. 0 = instant snap.", 0f, 30f, true));
 		BodyCamEnabled = config.Bind("02 - Body Camera", "Enable body camera", true, Toggle("Chest-mounted body camera: the view rides your torso, not the gun. Steps, turns, shots and breathing move the camera while the gun moves on its own in the frame. Applied only while the frame is drawn, so it never feeds back into the weapon or the deadzone."));
 		BodyCamStepBounce = config.Bind("02 - Body Camera", "Step bounce", 1f, D("Drop, dip and roll onto the planted foot on each step, scaled by speed. 0 = off, 1 = natural, 2 = heavy.", 0f, 2f, false));
 		BodyCamIrregularity = config.Bind("02 - Body Camera", "Step irregularity", 0.5f, D("How much each step differs from the last, plus a slow wander, so walking never looks like a clean sine. 0 = even, 1 = rough.", 0f, 1f, true));
 		BodyCamTurnLag = config.Bind("02 - Body Camera", "Turn lag", 1f, D("The chest arrives late on turns, so the gun leads across the frame. 0 = off, 1 = natural, 2 = loose.", 0f, 2f, false));
-		BodyCamShotJolt = config.Bind("02 - Body Camera", "Shot jolt", 1.2f, D("A short camera jolt on every shot that settles in about 0.15 s and never climbs. 0 = off, 1 = natural, 2 = strong.", 0f, 2f, false));
+		BodyCamShotJolt = config.Bind("02 - Body Camera", "Shot jolt", 1.2f, D("Camera shake when you fire. Each shot kicks the view up with a slight twist, then it settles in about 0.15 s (it never climbs like recoil). Heavier guns, tired arms and head or torso injuries kick harder; recoil skill and holding your breath soften it. Needs the body camera on, and fades out while aiming (see ADS fade). 0 = no shot shake, 1 = natural, 2 = strong.", 0f, 2f, false));
 		BodyCamBreath = config.Bind("02 - Body Camera", "Breathing", 0.3f, D("Chest rise and fall with your breathing, deeper when out of breath. 0 = off, 1 = strong.", 0f, 2f, true));
 		BodyCamExertion = config.Bind("02 - Body Camera", "Exertion response", 1f, D("How much low stamina deepens and quickens your breathing, both the sound and the chest motion. 0 = breathing stays calm, 2 = heavy post-sprint recovery.", 0f, 2f, true));
 		BodyCamTilt = config.Bind("02 - Body Camera", "Mount tilt (deg)", 0.6f, D("Slow drifting tilt, like a camera that never sits quite level on a moving chest. 0 = always level.", 0f, 3f, true));
@@ -237,6 +253,10 @@ internal static class HandlingConfig
 		HipCameraFollowZone = config.Bind("03 - Deadzone", "Weapon lag limit (deg)", 14.5f, new ConfigDescription("Maximum angle the weapon can trail behind the camera during hip fire.", new AcceptableValueRange<float>(1f, 30f)));
 		HipDeadzoneInfluence = config.Bind("03 - Deadzone", "Deadzone influence", 0.2535211f, D("How much player movement/turning adds procedural drift to the weapon. 0 = none, 1 = maximum sway.", 0f, 1f, true));
 		HipDeadzoneSmoothing = config.Bind("03 - Deadzone", "Weapon follow speed", 1f, D("How quickly the weighted weapon catches up with the player-driven camera. 0 = heavy/slow, 1 = responsive/fast.", 0f, 1f, true));
+		HipReturnToCenter = config.Bind("03 - Deadzone", "Return to center", 1f, D("How strongly the hip gun drifts back to the middle of the view. 1 = it re-centers (default), 0 = it stays where you left it inside the deadzone and only moves when the edge of the cone drags it. Below 1, reloads and other hand animations no longer snap it back either. Sprinting always re-centers; aiming uses its own setting under 04 - ADS Weapon Handling.", 0f, 1f, false));
+		CameraSettleAfterFiring = config.Bind("03 - Deadzone", "Camera settles after firing", true, Toggle("Helps the deadzone settle after shooting. Only matters when Return to center (hip or ADS) is below 1. On: once you stop firing, the view gently turns toward where the gun is pointing, so the gun eases back toward its natural hold while still aimed at the same spot. How far the view turns is set by Camera settle amount. Off: the view stays put and the gun stays wherever it was."));
+		CameraSettleAmount = config.Bind("03 - Deadzone", "Camera settle amount", 0.5f, D("How much of the gun's offset the view takes back after firing, as a gentle correction that eases in. The rest stays as the arms' natural hold. 0.25 = slight nudge, 0.5 = halfway (default), 1 = all the way until the gun is centered.", 0f, 1f, false));
+		HipVerticalFollow = config.Bind("03 - Deadzone", "Camera vertical follow (deg)", 5.5f, D("Hip only. How far the gun can trail up or down before the view follows it, so looking up or down doesn't leave the gun sitting low in the frame. Left and right keep the full Weapon lag limit. 0 = the gun never trails up or down, 5.5 = default, 10 = loose. If this is above Weapon lag limit, Weapon lag limit applies instead. Aiming is not affected.", 0f, 10f, false));
 		HipNaturalMotion = config.Bind("03 - Deadzone", "Natural motion", 1.1f, new ConfigDescription("Overall strength of human-like weapon motion at hip. Adds organic drift, mouse whip and directional tilt for an immersive feel. 0 = off, 1 = natural, higher = more pronounced.", new AcceptableValueRange<float>(0f, 3f)));
 		HipOrganicDrift = config.Bind("03 - Deadzone", "Organic drift", 0.4f, D("Perlin-noise micro-drift simulating hands holding a weapon. 0 = robotic/still, 1 = subtle human tremor, 2 = heavy drift.", 0f, 2f, true));
 		HipMouseWhip = config.Bind("03 - Deadzone", "Mouse whip", 1f, D("How much the weapon whips and lags behind fast mouse movements, then springs back. 0 = rigid, 1 = natural, 2 = heavy lag.", 0f, 3f, true));
@@ -254,6 +274,7 @@ internal static class HandlingConfig
 		AdsWeaponLead = config.Bind("04 - ADS Weapon Handling", "ADS weapon lead", 1f, D("While aiming, mouse turns twist the gun in your hands like the hip 'Body turn lead': the muzzle swings out ahead of the turn and the gun banks, then springs back. Pivots at the sight so the dot stays usable. 0 = off (rigid ADS), 1 = natural, 3 = dramatic.", 0f, 3f, false));
 		AdsDynamicCant = config.Bind("04 - ADS Weapon Handling", "Dynamic cant", 1f, D("How much turning, strafing and hand wander change the cant while aiming, so the gun is never locked level. 0 = static cant, 1 = natural, 2 = loose.", 0f, 2f, false));
 		DeadzoneEnabled = config.Bind("04 - ADS Weapon Handling", "Enable ADS deadzone", true, Toggle("ADS deadzone. The camera stays player-driven while the weapon trails toward the selected sight."));
+		AdsReturnToCenter = config.Bind("04 - ADS Weapon Handling", "ADS return to center", 1f, D("How strongly the gun drifts back to the middle of the view while aiming. 1 = the sight re-centers (default), 0 = free aim: the sight stays where you left it inside the ADS deadzone and only moves when the edge of the cone drags it. Below 1, reloads and other hand animations no longer snap it back either.", 0f, 1f, false));
 		DeadzoneAds = config.Bind("04 - ADS Weapon Handling", "ADS lag limit (deg)", 12f, new ConfigDescription("Maximum weapon-to-camera separation while aiming down sights.", new AcceptableValueRange<float>(0f, 12f)));
 		AdsFollowTightness = config.Bind("04 - ADS Weapon Handling", "ADS follow tightness", 0.3826291f, D("How tightly the aimed weapon follows the camera. 0 = heavy delayed catch-up, 1 = complete immediate follow. Weapon weight, ergonomics, movement and fatigue are calculated automatically.", 0f, 1f, true));
 		AimingEnabled = config.Bind("05 - Aiming Speed & Weight", "Enable aiming changes", true, Toggle("Scale ADS speed by weapon weight, ergonomics and hands stamina."));
@@ -277,6 +298,7 @@ internal static class HandlingConfig
 		ShotMisalignmentMax = config.Bind("07 - Recoil & Shot Response", "Maximum per shot (deg)", 1.5f, D("Clamp on a single shot's misalignment impulse.", 0.1f, 10f, true));
 		ShotBreathPenalty = config.Bind("07 - Recoil & Shot Response", "Accuracy loss per shot", 0.95f, D("Multiplier on the vanilla breath amplitude gain applied per shot.", 0f, 3f, true));
 		StaminaShotInfluence = config.Bind("07 - Recoil & Shot Response", "Stamina recoil influence", 3f, D("How much drained hands stamina increases shot misalignment and recoil shake.", 0f, 3f, true));
+		DisableTrueViewRecoil = config.Bind("07 - Recoil & Shot Response", "Disable TrueView recoil", false, Toggle("Turns off every recoil effect TrueView adds, in one switch: Shot jolt, Hand kick and shot misalignment (with its accuracy loss and stamina influence). Their own settings are kept for when you switch this back off. Only TrueView's extras are removed; the game's own recoil always plays as normal."));
 		CameraLagEnabled = config.Bind("08 - Camera Sway", "Enable camera lag", false, Toggle("The head/camera trails the weapon's sway instead of sitting rigidly on it."));
 		CameraSwayFollow = config.Bind("08 - Camera Sway", "Sway follow amount", 0.4037559f, D("Fraction of the weapon sway the camera drifts after.", 0f, 1f, true));
 		CameraSwayFollowSpeed = config.Bind("08 - Camera Sway", "Sway follow speed", 11.8f, D("How fast the camera catches up with the weapon sway. Lower lags further behind.", 0.5f, 20f, true));
@@ -312,8 +334,6 @@ internal static class HandlingConfig
 		TurnInPlaceIntensity = config.Bind("14 - Turn-in-Place Footwork", "Footwork intensity", 1.5f, D("Overall strength of twist and step effects on the camera and weapon. 0 = off, 1 = natural, 2 = pronounced.", 0f, 2f, true));
 		HitReactionEnabled = config.Bind("15 - Combat Feedback", "Enable hit reaction", true, Toggle("Getting hit knocks your view the way the round travelled: pitched back from the front, turned and tilted from the side, harder for a head hit; a stomach hit doubles you forward, a leg hit dips the view. Bleeding, falls and the like don't."));
 		HitReactionStrength = config.Bind("15 - Combat Feedback", "Hit reaction strength", 0.8f, new ConfigDescription("How hard a hit knocks the view (also scales with the damage). 0.5 = subtle, 1 = natural, 3 = violent.", new AcceptableValueRange<float>(0f, 3f), new ConfigurationManagerAttributes { IsAdvanced = true }));
-		MuzzleJoltEnabled = config.Bind("15 - Combat Feedback", "Enable muzzle jolt", true, Toggle("Firing shoves the body camera straight back a few millimeters instead of only rotating it."));
-		MuzzleJoltAmount = config.Bind("15 - Combat Feedback", "Muzzle jolt amount", 1f, new ConfigDescription("Strength of the translational camera kick on firing. 0.5 = subtle, 1 = natural, 3 = heavy.", new AcceptableValueRange<float>(0f, 3f), new ConfigurationManagerAttributes { IsAdvanced = true }));
 		FlybyEnabled = config.Bind("15 - Combat Feedback", "Enable bullet flyby", true, Toggle("Enemy rounds passing within 10 m whiz past your head (a random take, panned to the side they passed, louder the closer), then your head flinches away from them and adrenaline rises. Your own rounds don't count."));
 		FlybyVolume = config.Bind("15 - Combat Feedback", "Flyby whiz volume", 0.8f, D("Volume of the whiz takes (plugins/TrueView/audio/whiz_*.wav). They replace the game's own flyby sound; 0 or no takes = the game's sound plays instead.", 0f, 1f, false));
 		FlybyFlinchStrength = config.Bind("15 - Combat Feedback", "Flyby flinch strength", 1f, D("How hard a near miss makes your head duck and jerk away (also scales with how close it came). 0 = off, 1 = natural, 3 = jumpy.", 0f, 3f, false));

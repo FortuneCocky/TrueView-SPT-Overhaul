@@ -29,6 +29,7 @@ internal partial class NmBody
         for (int k = 0; k < Parts; k++) _gapMax[k] = _gapClamp[k] = _gapEnd[k] = 0f;
         for (int s = 0; s < 4; s++) { _rollJump[s] = 0f; _rollHave[s] = false; }
         _gapFrames = 0;
+        LegTwistAttach();
     }
 
     private void HingeSeen(int limb, Vector3 hinge)
@@ -77,5 +78,6 @@ internal partial class NmBody
         EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} SPT vs doll this reaction - joints: {(sb.Length > 0 ? sb.ToString() : "none")}; ends: {(ends.Length > 0 ? ends.ToString() : "n/a")}"
                            + $"; hinge turn per frame (max): knees {_rollJump[0]:F0}/{_rollJump[1]:F0}, elbows {_rollJump[2]:F0}/{_rollJump[3]:F0} deg"
                            + (_clampReady ? "" : " (joint clamp was off: its setup failed at the takeover)"));
+        LegTwistReport();
     }
 }

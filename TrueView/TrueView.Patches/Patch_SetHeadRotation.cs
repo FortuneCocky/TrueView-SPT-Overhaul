@@ -37,18 +37,11 @@ internal class Patch_SetHeadRotation : ModulePatch
 			return;
 		}
 
-		// Skip all camera modifications during free look — let vanilla handle it
-		if (player.MouseLookControl)
+		// Skip all camera modifications during free look and its return to
+		// centre — let vanilla handle it
+		if (HandlingManager.InFreeLook(player))
 		{
 			HandlingState.HeadRotation = headRot;
-			return;
-		}
-
-		// Skip deadzone/camera modifications during free-look return smoothing.
-		// HandlingManager.Tick() sets HandlingState.HeadRotation directly
-		// during the smoothing transition.
-		if (HandlingManager.IsFreeLookReturnActive)
-		{
 			return;
 		}
 

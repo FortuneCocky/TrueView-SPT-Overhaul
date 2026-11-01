@@ -37,6 +37,11 @@ internal static class TurnRollSystem
 		{
 			return;
 		}
+		// The roll spring runs in real time (capped at 0.2 s) on 1/60 s sub-steps.
+		// One big step blows up: at w = 26 rad/s this integrator goes unstable
+		// past ~0.05 s, so below ~20 fps the view rolled ±30° back and forth
+		// every frame. At 60 fps and up it's one step, same as before.
+		float rollDt = Mathf.Min(deltaTime, 0.2f);
 		deltaTime = Mathf.Min(deltaTime, 1f / 15f);
 		bool on = HandlingState.HasWeapon && player != null; // each slider at 0 is off
 
@@ -52,8 +57,14 @@ internal static class TurnRollSystem
 			}
 		}
 		float w = 2f * Mathf.PI * RollFrequency;
-		_rollVel += ((target - _roll) * w * w - _rollVel * 2f * RollDamping * w) * deltaTime;
-		_roll = Mathf.Clamp(_roll + _rollVel * deltaTime, -30f, 30f);
+		int n = Mathf.Max(1, Mathf.CeilToInt(rollDt * 60f - 0.01f));
+		float h = rollDt / n;
+		for (int i = 0; i < n; i++)
+		{
+			_rollVel += ((target - _roll) * w * w - _rollVel * 2f * RollDamping * w) * h;
+			_roll += _rollVel * h;
+		}
+		_roll = Mathf.Clamp(_roll, -30f, 30f);
 
 		// --- ADS arc ---
 		bool aiming = on && HandlingState.IsAiming;

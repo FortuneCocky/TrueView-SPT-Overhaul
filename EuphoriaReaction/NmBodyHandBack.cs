@@ -92,6 +92,7 @@ internal partial class NmBody
             else _bones[k].rotation = q;
         }
         KneeGuard();
+        LegTwistTick("hand-back");
         GunBackLate(); // the gun with the blended hand (again before render, after the game's weapon pass)
     }
 

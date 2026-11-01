@@ -656,7 +656,7 @@ internal partial class NmBody : MonoBehaviour
         _blending = false;
         _getUp = null;
         _dying = false;
-        _corpse.Clear();
+        _corpse.Clear(); _corpseWasKinematic.Clear();
         _corpseGate = null; _corpseRag = null;
         _downSince = 0f; _armsSince = 0f;
         _blendDur = BlendOut;
@@ -998,6 +998,7 @@ internal partial class NmBody : MonoBehaviour
     private (Vector3 at, Vector3 dir, int part) _lastHit;
     private const float AlivePushScale = 0.67f; // ~30 N*s base: staggers without bowling him over
     private readonly List<Rigidbody> _corpse = new List<Rigidbody>();
+    private readonly Dictionary<Rigidbody, bool> _corpseWasKinematic = new Dictionary<Rigidbody, bool>(); // as EFT had each body before we held it
 
     private void UpdateDying()
     {
@@ -1074,7 +1075,7 @@ internal partial class NmBody : MonoBehaviour
         if (Time.time < _dyingSince + 2f || _corpse.Count == 0)
         {
             foreach (Rigidbody rb in _p.GetComponentsInChildren<Rigidbody>(true))
-                if (rb != null && !_corpse.Contains(rb)) _corpse.Add(rb);
+                if (rb != null && !_corpse.Contains(rb)) { _corpse.Add(rb); _corpseWasKinematic[rb] = rb.isKinematic; }
         }
         foreach (Rigidbody rb in _corpse)
             if (rb != null && !rb.isKinematic) rb.isKinematic = true;
@@ -1085,9 +1086,23 @@ internal partial class NmBody : MonoBehaviour
     // hold kinematic never moves: it was frozen for good wherever the doll had him (in the air, when the
     // doll lay on something), and the bodies we then let go had left EFT's physics update - no gravity,
     // so a bot landing on him floated him off. Its still-check waits until we let go, then counts afresh.
-    private sealed class CorpseGate { internal bool Held = true; internal float ReleasedAt, Made = Time.time; }
+    // Its sleep loop is held off too: each frame it marks every body that isn't moving "must sleep" for
+    // good and calls Sleep() on it, and a held body never moves. Every body was marked while we held him,
+    // so the ones we let go were put back to sleep on the next frame, hung there with no gravity, and a
+    // second later the still-check froze him in mid-air for good. The loop gets no bodies while he's held
+    // and for a second after (a body let go at rest would sleep before gravity moved it), then its own
+    // list back with every mark cleared.
+    // A body EFT's loop puts to sleep has its speed zeroed, and each frame after it's put back to sleep
+    // before gravity can move it: one that was still for a moment off the ground (resting on a body or
+    // prop that then moved) hung there, and the loop's 15 s timeout froze him in mid-air for good. While
+    // he's asleep with his lowest part off what's under him, or as EFT is about to stop him like that, the
+    // loop is held off again for a second with every mark cleared, so he falls before it counts him again.
+    private sealed class CorpseGate { internal bool Held = true; internal float ReleasedAt, Made = Time.time, NextAirCheck; internal int AirWakes; }
     private CorpseGate _corpseGate;
     private EFT.Interactive.CorpseRagdoll _corpseRag;
+    private const float CorpseAirGap = 0.3f; // m: a corpse whose lowest part is this far above what's under it isn't lying on anything
+    private const int MaxAirWakes = 6;
+    private static readonly RaycastHit[] _airHits = new RaycastHit[16];
 
     private void GateCorpseSleep()
     {
@@ -1096,9 +1111,75 @@ internal partial class NmBody : MonoBehaviour
         if (rag == null || rag._checkCorpseIsStill == null) return;
         var gate = new CorpseGate();
         System.Func<bool, float, bool> eft = rag._checkCorpseIsStill;
+        var bodies = rag._rigidbodySleepHierarchy;
+        var none = bodies?.GetRange(0, 0);
+        if (bodies != null) rag._rigidbodySleepHierarchy = none;
+        bool SleepLoopBack()
+        {
+            if (bodies == null || rag._rigidbodySleepHierarchy != none) return false;
+            foreach (var h in bodies) h.Reset();
+            rag._rigidbodySleepHierarchy = bodies;
+            return true; // the loop counts its own bodies from the next frame on
+        }
+        bool SleepLoopOff()
+        {
+            if (bodies == null || rag._rigidbodySleepHierarchy == none) return false;
+            rag._rigidbodySleepHierarchy = none;
+            foreach (var h in bodies) h.WakeUp(); // mark cleared, gravity has it again
+            return true;
+        }
+        Transform root = _p.gameObject.transform;
+        string id = _p.ProfileId;
+        // how far his lowest part is above whatever is under it (m); -1 when no body is asleep and none is asked for
+        float Gap(bool always)
+        {
+            if (bodies == null || root == null) return -1f;
+            bool asleep = always;
+            float low = float.MaxValue;
+            foreach (var h in bodies)
+            {
+                Collider c = h.RigidbodySpawner != null ? h.RigidbodySpawner.GetComponent<Collider>() : null;
+                if (c == null) continue;
+                Rigidbody rb = h.RigidbodySpawner.Rigidbody;
+                if (rb != null && rb.IsSleeping()) asleep = true;
+                Bounds b = c.bounds;
+                float under = b.center.y - 10f;
+                int n = Physics.RaycastNonAlloc(b.center, Vector3.down, _airHits, 10f, ~0, QueryTriggerInteraction.Ignore);
+                for (int i = 0; i < n; i++)
+                    if (!_airHits[i].collider.transform.IsChildOf(root) && _airHits[i].point.y > under) under = _airHits[i].point.y;
+                low = Mathf.Min(low, Mathf.Max(0f, b.min.y - under));
+            }
+            return asleep && low < float.MaxValue ? low : -1f;
+        }
         rag._checkCorpseIsStill = (sleeping, timePass) =>
-            gate.Held ? Time.time > gate.Made + 30f && eft(sleeping, timePass) // never let go: EFT's own rule after a while
-            : Time.time > gate.ReleasedAt + 1f && eft(sleeping, Time.time - gate.ReleasedAt - 1f);
+        {
+            if (gate.Held)
+                return Time.time > gate.Made + 30f && !SleepLoopBack() && eft(sleeping, timePass); // never let go: EFT's own rule after a while
+            if (Time.time < gate.ReleasedAt + 1f || SleepLoopBack()) return false;
+            float since = Time.time - gate.ReleasedAt - 1f;
+            bool stop = eft(sleeping, since);
+            float gap = -1f;
+            if ((stop || Time.time >= gate.NextAirCheck) && gate.AirWakes < MaxAirWakes)
+            {
+                gate.NextAirCheck = Time.time + 0.5f;
+                gap = Gap(stop);
+                if (gap > CorpseAirGap && SleepLoopOff())
+                {
+                    gate.AirWakes++;
+                    gate.ReleasedAt = Time.time; // a second of gravity before the loop counts him again
+                    EuphoriaPlugin.Log($"Delirium: {id} corpse asleep {gap * 100f:F0} cm off what's under it ({(stop ? "EFT about to stop him" : "sleep loop")}) - woken to fall");
+                    return false;
+                }
+            }
+            if (stop)
+            {
+                if (gap < 0f) gap = Gap(true);
+                EuphoriaPlugin.Log($"Delirium: {id} corpse stopped by EFT {since:F1}s after the hand-back ({(sleeping ? "at rest" : "timed out moving")}), " +
+                                   $"lowest part {gap * 100f:F0} cm above what's under it{(gate.AirWakes > 0 ? $", woken {gate.AirWakes}x in the air" : "")}, " +
+                                   $"physics {(global::PhysicsExtensions.Simulation.CanRunSimulate ? "running" : "PAUSED")}");
+            }
+            return stop;
+        };
         _corpseGate = gate;
         _corpseRag = rag;
         if (rag._isPhysicsDone) EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} corpse was already put to sleep by EFT");
@@ -1114,19 +1195,39 @@ internal partial class NmBody : MonoBehaviour
         if (asleep)
         {
             EuphoriaPlugin.Log("Delirium: corpse already asleep in EFT - left where it lies");
+            RestoreNonRagdoll();
             _corpse.Clear();
+            _corpseWasKinematic.Clear();
             return;
         }
+        int kept = RestoreNonRagdoll();
         foreach (Rigidbody rb in _corpse)
         {
-            if (rb == null) continue;
+            if (rb == null || !rb.name.StartsWith("Base Human")) continue;
             rb.isKinematic = false;
             rb.velocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
             rb.WakeUp();
         }
-        if (_corpse.Count > 0) EuphoriaPlugin.Log($"Delirium: corpse ragdoll handed back ({_corpse.Count} bodies)");
+        if (_corpse.Count > 0) EuphoriaPlugin.Log($"Delirium: corpse ragdoll handed back ({_corpse.Count - kept} bodies, {kept} others put back as EFT had them)");
         _corpse.Clear();
+        _corpseWasKinematic.Clear();
+    }
+
+    // Bodies we held that aren't his ragdoll (his own root body: 1 kg, no gravity, kinematic in EFT) go
+    // back to how EFT had them. Let go with the ragdoll, his root was left loose and weightless; once EFT
+    // took the ragdoll bodies off (as soon as he was out of view) all his limb colliders landed on it, and
+    // he floated up off the floor to the ceiling - or flew off into the sky when a shot hit him.
+    private int RestoreNonRagdoll()
+    {
+        int n = 0;
+        foreach (Rigidbody rb in _corpse)
+        {
+            if (rb == null || rb.name.StartsWith("Base Human")) continue;
+            rb.isKinematic = (_p != null && rb.gameObject == _p.gameObject) || !_corpseWasKinematic.TryGetValue(rb, out bool was) || was;
+            n++;
+        }
+        return n;
     }
 
     // Each corpse body's share of the weight (fractions of body mass, standard adult segment tables), a
@@ -1980,6 +2081,7 @@ internal partial class NmBody : MonoBehaviour
         if (_matching || MatchFading) MatchVisual(); // recovering: SPT's bones settle into the stance he's handed back in (eased off when cancelled)
         if (_pgu) PhysGetUpShow(); // getting up: the clip mixed back in over the doll
         KneeGuard(); // whatever posed them: knees bend only the way a knee does (NmBodyKneeGuard)
+        LegTwistTick(_pgu ? "physical get-up" : _matching ? "stance match" : _dying ? "dying" : "doll's pose"); // diagnostic (NmBodyLegTwist)
         HoldGun();
         if (_matching) ReachSupportGrip(); // recovering: the free hand finds its place on the gun again
         // what we gave the arms this frame, for the late pass to put back if the game re-poses them after us

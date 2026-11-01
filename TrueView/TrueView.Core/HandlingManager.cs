@@ -18,23 +18,22 @@ internal static class HandlingManager
     // Track free-look state to detect the transition out of free look
     private static bool _wasFreeLooking;
 
-    // Free-look return smoothing state — smoothly interpolates the camera
-    // from the free-look end position back to the forward view instead of
-    // snapping instantly.
-    private static bool _freeLookReturnActive;
-    private static Vector3 _freeLookReturnStart;
-    private static Vector3 _freeLookReturnTarget;
-    private static float _freeLookReturnT;
-
     // Track the current firearm instance so we can detect weapon swaps
     // and reset procedural state — prevents the weapon from being
     // misplaced when switching weapons mid-sprint.
     private static object _lastFirearm;
 
-    // Whether the free-look return smoothing is currently active.
-    // Patch_SetHeadRotation checks this to skip deadzone modifications
-    // during the smoothing transition.
-    public static bool IsFreeLookReturnActive => _freeLookReturnActive;
+    /// <summary>
+    /// Vanilla free look owns the camera and the gun: while the key is held,
+    /// and while the game swings the head back to centre after release
+    /// (player.HeadRotation is only ever set by free look and is zero otherwise).
+    /// TrueView stands aside for all of it and takes over again once the view
+    /// is back at centre.
+    /// </summary>
+    public static bool InFreeLook(Player player)
+    {
+        return player.MouseLookControl || player.HeadRotation.sqrMagnitude > 1e-6f;
+    }
 
     public static void Tick(Player player, float dt)
     {
@@ -50,76 +49,28 @@ internal static class HandlingManager
 
     private static void TickSystems(Player player, float dt)
     {
-        if (player.MouseLookControl)
+        if (InFreeLook(player))
         {
-            // Reset procedural state when entering free look so the camera
-            // doesn't jump when free look ends and the deadzone re-engages.
-            if (_wasActive)
+            // Hand the camera and gun to vanilla free look: drop every
+            // procedural offset once on the way in, then stay out until the
+            // game has swung the head back to centre.
+            if (!_wasFreeLooking)
             {
                 ResetAll(player);
+                ProceduralHipSystem.Reset();
+                _wasFreeLooking = true;
+                Utilities.Log.Info("Free look: TrueView paused");
             }
-            _wasFreeLooking = true;
             return;
         }
 
-        // Just exited free look — start smoothing the camera back to the
-        // forward rotation instead of snapping instantly.
+        // The view is back at centre: start every system fresh from the rest
+        // pose, which is exactly where vanilla free look left the camera.
         if (_wasFreeLooking)
         {
-            _wasFreeLooking = false;
             ResetAll(player);
-
-            // Capture the current camera rotation as the smoothing start point,
-            // and the player's forward rotation as the target.
-            Vector3 forwardRot = player.Rotation;
-            _freeLookReturnStart = HandlingState.HeadRotation;
-            _freeLookReturnTarget = forwardRot;
-            _freeLookReturnT = 0f;
-
-            float returnSpeed = HandlingConfig.FreeLookReturnSpeed?.Value ?? 12f;
-            if (returnSpeed <= 0f)
-            {
-                // Instant snap — no smoothing
-                if (player.ProceduralWeaponAnimation != null)
-                {
-                    player.ProceduralWeaponAnimation.SetHeadRotation(forwardRot);
-                }
-                HandlingState.HeadRotation = forwardRot;
-            }
-            else
-            {
-                _freeLookReturnActive = true;
-            }
-        }
-
-        // If free-look return smoothing is active, interpolate the camera
-        // towards the forward rotation and bypass normal deadzone processing.
-        if (_freeLookReturnActive)
-        {
-            float returnSpeed = HandlingConfig.FreeLookReturnSpeed?.Value ?? 12f;
-            _freeLookReturnT = Mathf.Clamp01(_freeLookReturnT + Time.deltaTime * returnSpeed);
-
-            Vector3 smoothed = new Vector3(
-                Mathf.LerpAngle(_freeLookReturnStart.x, _freeLookReturnTarget.x, _freeLookReturnT),
-                Mathf.LerpAngle(_freeLookReturnStart.y, _freeLookReturnTarget.y, _freeLookReturnT),
-                Mathf.LerpAngle(_freeLookReturnStart.z, _freeLookReturnTarget.z, _freeLookReturnT)
-            );
-
-            HandlingState.HeadRotation = smoothed;
-            if (player.ProceduralWeaponAnimation != null)
-            {
-                player.ProceduralWeaponAnimation.SetHeadRotation(smoothed);
-            }
-
-            if (_freeLookReturnT >= 1f)
-            {
-                _freeLookReturnActive = false;
-                // Deadzone systems were reset when free look ended and haven't
-                // been modified during smoothing. They will re-initialize from
-                // the current rotation on the next frame's normal processing.
-                HandlingState.HeadRotation = _freeLookReturnTarget;
-            }
-            return;
+            ProceduralHipSystem.Reset();
+            Utilities.Log.Info("Free look: view back at centre, TrueView resumed");
         }
         // Reset all procedural state when inventory/looting is open so the
         // weapon position doesn't get corrupted by stale offsets.
@@ -216,7 +167,6 @@ internal static class HandlingManager
     {
         _wasActive = false;
         _wasFreeLooking = false;
-        _freeLookReturnActive = false;
         _lastFirearm = null;
         SwaySystem.Reset();
         ShotSystem.Reset();

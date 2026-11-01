@@ -28,6 +28,7 @@ internal static class ShotSystem
 		_lastShotTime = Time.unscaledTime;
 		if (!HandlingState.HasWeapon)
 			return;
+		ProceduralHipSystem.NotifyShot();
 
 		WeaponStats stats = HandlingState.Stats;
 		float fatigue = 1f - HandlingState.HandsStamina01;
@@ -58,10 +59,10 @@ internal static class ShotSystem
 			Mathf.Lerp(1f, 1.25f, fatigue) * InjuryHandlingSystem.RecoilMultiplier * breathHoldScale;
 		ProceduralHipSystem.AddHandKick(handKick);
 
-		if (HandlingConfig.ShotMisalignmentEnabled.Value)
+		if (HandlingConfig.ShotMisalignmentOn)
 		{
-			float num = breathHoldScale * HandlingConfig.ShotMisalignmentStrength.Value * (1f + stats.WeightProgress) * (1.5f - 0.5f * stats.Ergonomics01) * adsScale * skillScale * (1f + fatigue * HandlingConfig.StaminaShotInfluence.Value) * InjuryHandlingSystem.RecoilMultiplier;
-			float value = HandlingConfig.ShotMisalignmentMax.Value * (aiming ? 0.6f : 1f);
+			float num = breathHoldScale * HandlingConfig.ShotMisalignmentStrengthValue * (1f + stats.WeightProgress) * (1.5f - 0.5f * stats.Ergonomics01) * adsScale * skillScale * (1f + fatigue * HandlingConfig.StaminaShotInfluenceValue) * InjuryHandlingSystem.RecoilMultiplier;
+			float value = HandlingConfig.ShotMisalignmentMaxValue * (aiming ? 0.6f : 1f);
 			// Skilled shooters also keep the muzzle straighter side-to-side.
 			float yaw = Mathf.Clamp(HandlingMath.SignedRandom(num * 0.6f * Mathf.Lerp(1f, 0.6f, skill)), 0f - value, value);
 			// Negative X is muzzle-up in Unity's euler convention.
@@ -85,7 +86,7 @@ internal static class ShotSystem
 				_baseGainWeaponId = weaponId;
 				_baseGainPerShot = breath.AmplitudeGainPerShot;
 			}
-			breath.AmplitudeGainPerShot = (HandlingConfig.ShotMisalignmentEnabled.Value ? (_baseGainPerShot * (1f + HandlingConfig.ShotBreathPenalty.Value) * (1f + (1f - HandlingState.HandsStamina01) * HandlingConfig.StaminaShotInfluence.Value)) : _baseGainPerShot);
+			breath.AmplitudeGainPerShot = (HandlingConfig.ShotMisalignmentOn ? (_baseGainPerShot * (1f + HandlingConfig.ShotBreathPenaltyValue) * (1f + (1f - HandlingState.HandsStamina01) * HandlingConfig.StaminaShotInfluenceValue)) : _baseGainPerShot);
 		}
 	}
 

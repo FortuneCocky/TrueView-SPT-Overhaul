@@ -53,10 +53,14 @@ internal partial class HitNudge : MonoBehaviour
     private const float BackFreq = 5f, BackZeta = 0.8f;       // then a firm spring back, little overshoot
     private const float HeavyKick = 3f;                       // x the normal spin
     private const float ArmSag = 22f;                         // rad/s^2 of droop on a limp arm
+    // the springs step at most this long: in one frame step, the firm spring back went unstable below ~33 fps
+    // (and the normal one at 20), and a limp arm flailed between its limits for good instead of coming back
+    private const float MaxStep = 1f / 120f;
     private static readonly float[] HeavyMax = new float[21];
     private readonly float[] _limpUntil = new float[21];
     private readonly bool[] _heavy = new bool[21];            // past its normal range: still coming back
     private bool _leftArmLimp;
+    private float _leftArmSince;                              // the last heavy hit on the left arm (0: not limp)
 
     static HitNudge()
     {
@@ -241,7 +245,10 @@ internal partial class HitNudge : MonoBehaviour
                 case 1: case 2: case 3: Limp(1, 1f, limp); Limp(2, 0.8f, limp); return true;     // left leg
                 case 4: case 5: case 6: Limp(4, 1f, limp); Limp(5, 0.8f, limp); return true;     // right leg
                 case 13: case 14: case 15: case 16:                                                // left arm: limp
-                    Limp(14, 1f, limp); Limp(15, 0.9f, limp); _leftArmLimp = true; return true;
+                    Limp(14, 1f, limp); Limp(15, 0.9f, limp); _leftArmLimp = true;
+                    if (_leftArmSince == 0f) EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} heavy nudge - left arm limp for {limp:F1}s ({1f / Mathf.Max(Time.deltaTime, 1e-3f):F0} fps)");
+                    _leftArmSince = Time.time;
+                    return true;
                 case 17: case 18: case 19: case 20:                                                // gun arm: a hard shoulder jolt
                     Limp(10, 1f, limp * 0.5f); Limp(9, 0.5f, limp * 0.5f); return true;
                 default: return false;
@@ -297,6 +304,8 @@ internal partial class HitNudge : MonoBehaviour
         bool any = false;
         foreach (int k in Kept) if (_bones[k] != null) _keptRot[k] = _bones[k].rotation;
         if (_na != System.IntPtr.Zero) any = DollPose(dt); // the physical nudge first: the springs (heavy nudge) ride on it
+        int steps = Mathf.Max(1, Mathf.CeilToInt(dt / MaxStep));
+        float h = dt / steps;
         foreach (int k in Nudged) // parent-first, so a child's nudge rides on its parent's
         {
             Transform b = _bones[k];
@@ -304,17 +313,21 @@ internal partial class HitNudge : MonoBehaviour
             bool limp = Time.time < _limpUntil[k];
             float f = limp ? 2f * Mathf.PI * LimpFreq : _heavy[k] ? 2f * Mathf.PI * BackFreq : w;
             float z = limp ? LimpZeta : _heavy[k] ? BackZeta : Zeta;
-            Vector3 acc = -f * f * _theta[k] - 2f * z * f * _omega[k];
             // a limp arm hangs: its weight turns it toward straight down
+            Vector3 sag = Vector3.zero;
             if (limp && (k == 14 || k == 15) && _bones[k + 1] != null)
             {
                 Vector3 along = _bones[k + 1].position - b.position;
-                if (along.sqrMagnitude > 1e-6f) acc += Vector3.Cross(along.normalized, Vector3.down) * ArmSag;
+                if (along.sqrMagnitude > 1e-6f) sag = Vector3.Cross(along.normalized, Vector3.down) * ArmSag;
             }
-            _omega[k] += acc * dt;
-            _theta[k] += _omega[k] * dt;
             float max = (_heavy[k] ? HeavyMax[k] : MaxDeg[k]) * Mathf.Deg2Rad;
-            if (_theta[k].magnitude > max) { _theta[k] = _theta[k].normalized * max; _omega[k] *= 0.5f; }
+            for (int s = 0; s < steps; s++)
+            {
+                Vector3 acc = -f * f * _theta[k] - 2f * z * f * _omega[k] + sag;
+                _omega[k] += acc * h;
+                _theta[k] += _omega[k] * h;
+                if (_theta[k].magnitude > max) { _theta[k] = _theta[k].normalized * max; _omega[k] *= 0.5f; }
+            }
             if (_heavy[k] && !limp && _theta[k].magnitude <= MaxDeg[k] * Mathf.Deg2Rad + 1e-3f) _heavy[k] = false; // back in its normal range
             float ang = _theta[k].magnitude;
             if (ang < 1e-4f && _omega[k].sqrMagnitude < 1e-6f) { _theta[k] = _omega[k] = Vector3.zero; continue; }
@@ -323,6 +336,11 @@ internal partial class HitNudge : MonoBehaviour
         }
         // a limp left hand goes with its arm; otherwise feet and hands keep the animation's angle
         _leftArmLimp = _leftArmLimp && (_heavy[14] || _heavy[15]);
+        if (_leftArmSince > 0f && !_leftArmLimp)
+        {
+            EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} heavy nudge - left arm back on the animation {Time.time - _leftArmSince:F1}s after the last hit");
+            _leftArmSince = 0f;
+        }
         foreach (int k in Kept) if (_bones[k] != null && !(k == 16 && _leftArmLimp)) _bones[k].rotation = _keptRot[k];
         RideEnd();
         _moving = any;
@@ -332,6 +350,7 @@ internal partial class HitNudge : MonoBehaviour
     {
         for (int k = 0; k < 21; k++) { _theta[k] = _omega[k] = Vector3.zero; _limpUntil[k] = 0f; _heavy[k] = false; }
         _leftArmLimp = false;
+        _leftArmSince = 0f;
         _moving = false;
         _ride = false;
         DollDown();

@@ -23,10 +23,12 @@ Your weapon stops being glued to the centre of the screen.
 - **Weight you can feel.** Heavy guns aim slower, sway more and settle harder. Pistols snap around.
 - **Aim deadzone.** The gun moves freely inside a small cone and the camera only follows when it reaches the edge.
 - **Hip-fire deadzone.** When you aren't aiming, the muzzle drifts naturally and your wrist rolls.
+- **Free aim.** "Return to center" (hip and ADS) sets how strongly the gun drifts back to the middle of the view. At 0 it stays where you left it inside the deadzone, and the camera never locks while you fire. After you stop firing, the camera settles back a set amount, and in hip fire it follows the gun up or down past a few degrees.
 - **Sway and inertia.** Breathing, walking, fatigue and the weapon's own momentum all move the gun.
 - **Camera lag.** Your head trails the weapon instead of being bolted to it.
 - **Recoil that misaligns.** Every shot knocks the gun off target, and tired arms make it worse.
 - **Hand kick.** In hip fire, each shot kicks the gun up and back around your grip, and it settles in about a tenth of a second.
+- **One recoil switch.** "Disable TrueView recoil" turns off every recoil effect TrueView adds (shot jolt, hand kick, misalignment) and keeps only the game's own recoil.
 - **Collision-aware ADS.** The gun pulls back near walls instead of clipping through them.
 
 ## 🏃 TrueView — body and camera
