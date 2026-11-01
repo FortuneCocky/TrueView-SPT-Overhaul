@@ -2,10 +2,10 @@ TrueView License
 
 Copyright (c) 2026 FortuneCocky
 
-This project (TrueView) is a derivative of TarkovIRL - Weapons Handling
-Mod, originally created by adishee (https://github.com/crm85/TarkovIRL-public).
-Portions of the weapon deadzone and handling systems were ported from
-TarkovIRL and remain attributed to its original author.
+This project (TrueView) was inspired by TarkovIRL - Weapons Handling Mod by
+adishee (https://github.com/crm85/TarkovIRL-public). The ideas behind the
+weapon deadzone and some handling systems came from TarkovIRL; no TarkovIRL
+code is used. Credit for those ideas goes to adishee.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to
@@ -21,8 +21,8 @@ subject to the following conditions:
    site or service without prior written permission from the copyright
    holder.
 
-3. ATTRIBUTION: Any permitted use must retain this license notice and the
-   attribution to adishee for the portions ported from TarkovIRL.
+3. ATTRIBUTION: Any permitted use must retain this license notice, including
+   the credit to adishee for the ideas taken from TarkovIRL.
 
 4. COMMERCIAL USE: Commercial use of the Software is prohibited without
    prior written permission from the copyright holder.

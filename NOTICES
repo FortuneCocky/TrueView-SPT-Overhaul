@@ -2,16 +2,15 @@
 
 ## TarkovIRL — Weapons Handling Mod
 
-This project (TrueView) is a derivative work based on TarkovIRL, originally
-created by **adishee**.
+TrueView was inspired by TarkovIRL, created by **adishee**.
 
 - Original project: https://github.com/crm85/TarkovIRL-public
 - Original mod page: https://forge.sp-tarkov.com/mod/1459/tarkovirl-weapons-handling-mod
 - Author: adishee (https://github.com/crm85)
 
-The weapon deadzone system and several weapon handling concepts in this
-project were ported from TarkovIRL's source code. Full credit for the
-original implementation goes to adishee.
+The ideas behind TrueView's weapon deadzone system and several weapon
+handling concepts came from TarkovIRL. No TarkovIRL code is used: TrueView's
+implementation is its own. Full credit for the original ideas goes to adishee.
 
 ## SPT — Single Player Tarkov
 

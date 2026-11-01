@@ -199,7 +199,7 @@ Euphoria Reactions also needs `delirium_physics.dll` from the [Delirium physics 
 
 ## 🙏 Credits
 
-- **adishee**: author of [TarkovIRL](https://forge.sp-tarkov.com/mod/1459/tarkovirl-weapons-handling-mod). TrueView's weapon deadzone system and several handling ideas come from TarkovIRL. Full credit for the original work.
+- **adishee**: author of [TarkovIRL](https://forge.sp-tarkov.com/mod/1459/tarkovirl-weapons-handling-mod). TrueView was inspired by TarkovIRL: the ideas behind its weapon deadzone system and several handling features came from it (no TarkovIRL code is used). Full credit to adishee for those ideas.
 - **YoucefNabil**: author of the [Delirium physics engine](https://github.com/YoucefNabil/delirium-physics), which Euphoria Reactions runs on (`delirium_physics.dll`, GPL-3.0, under its own license).
 - **Get-up animations** generated with NVIDIA MotionBricks.
 - **Audio Library: Sound Effects** ([YouTube](https://www.youtube.com/@AudioLibrarySoundEffects)): breathing recordings.
