@@ -10,9 +10,7 @@ TrueView bundles client mods that are built to work together:
 | **Tactical Stances** | Low ready, high ready, active aim, canted aim and shoulder swap |
 | **Dynamic DoF** | Eye-like depth of field that focuses on whatever you look at |
 | **BloodFX** | Fully volumetric blood: spurts, drips, trails, pools, wounds, armor impacts and head dismemberment |
-| **Euphoria Reactions** *(coming soon)* | Physics-driven hit reactions: bots stagger, catch themselves, buckle, fall and get back up |
-
-> **Euphoria Reactions isn't in the release zip yet.** It now runs on its own physics body built from Tarkov's skeleton, with no outside game data. Its source is here; it will ship in a later release.
+| **Euphoria Reactions** | Physics-driven hit reactions: bots stagger, catch themselves, buckle, fall and get back up |
 
 Each one has its own config file. Turn any of them off or tune it however you like.
 
@@ -122,7 +120,7 @@ Blood that is actual 3D geometry, not flat sprites. Every drop collides with the
 
 ---
 
-## 💥 Euphoria Reactions *(coming soon)*
+## 💥 Euphoria Reactions
 
 Bots react to being shot with their whole body, driven by a real-time physics simulation instead of canned animations. The bullet's push lands where it hit, the body's muscles and balance fight it, and what happens next is different every time.
 
@@ -163,7 +161,7 @@ Bots react to being shot with their whole body, driven by a real-time physics si
 
 ## 📦 Install
 
-1. Download the latest zip from [Releases](https://github.com/FortuneCocky/TrueView-SPT-Rework/releases).
+1. Download the latest zip from [Releases](https://github.com/FortuneCocky/TrueView-SPT-Overhaul/releases).
 2. Extract it into your **SPT root folder** and merge the `BepInEx` folder.
 3. Launch the game once to generate the configs:
    - `BepInEx/config/com.trueview.cfg`
@@ -197,7 +195,7 @@ Each mod is its own project in this repo:
 2. Point the `SPTDir` (or `SPT_INSTALL_DIR`) property in each `.csproj` at your SPT folder. The game and BepInEx assemblies are referenced from there and are not included here.
 3. Run `dotnet build -c Release` in a mod's folder, or its `build_*.bat`, which also copies the DLL into your SPT plugins folder.
 
-Euphoria Reactions also needs `delirium_physics.dll` from the [Delirium physics engine](https://github.com/YoucefNabil/delirium-physics) and `getups.bin` (the get-up clips) next to its DLL. Its `body.json` and `presets/` are in this repo and are copied by `build_euphoria.bat`. It is not in the release zip yet.
+Euphoria Reactions also needs `delirium_physics.dll` from the [Delirium physics engine](https://github.com/YoucefNabil/delirium-physics) and `getups.bin` (the get-up clips) next to its DLL. Its `body.json` and `presets/` are in this repo and are copied by `build_euphoria.bat`.
 
 ## 🙏 Credits
 
