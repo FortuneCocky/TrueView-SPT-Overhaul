@@ -12,6 +12,16 @@ The ideas behind TrueView's weapon deadzone system and several weapon
 handling concepts came from TarkovIRL. No TarkovIRL code is used: TrueView's
 implementation is its own. Full credit for the original ideas goes to adishee.
 
+## SPT Stance Overhaul
+
+Tactical Stances was inspired by SPT Stance Overhaul (originally the stance
+system in SPT Realism Mod), created by **Fontaine**. Its feature set (high
+ready, low ready, active aim, canted aim and the mechanics around them)
+follows that work. Full credit for those ideas goes to Fontaine.
+
+- Mod page: https://sp-mod.com/mod/3136/spt-stance-overhaul
+- Source: https://github.com/space-commits/spt-stance-overhaul
+
 ## SPT — Single Player Tarkov
 
 This mod targets SPT (Single Player Tarkov) and would not be possible

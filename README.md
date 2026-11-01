@@ -53,6 +53,8 @@ Your weapon stops being glued to the centre of the screen.
 
 ## 🎯 Tactical Stances
 
+*Inspired by Fontaine's [SPT Stance Overhaul](https://sp-mod.com/mod/3136/spt-stance-overhaul).*
+
 Carry your weapon like an operator instead of always having it shouldered.
 
 | Stance | Feel |
@@ -200,6 +202,7 @@ Euphoria Reactions also needs `delirium_physics.dll` from the [Delirium physics 
 ## 🙏 Credits
 
 - **adishee**: author of [TarkovIRL](https://forge.sp-tarkov.com/mod/1459/tarkovirl-weapons-handling-mod). TrueView was inspired by TarkovIRL: the ideas behind its weapon deadzone system and several handling features came from it (no TarkovIRL code is used). Full credit to adishee for those ideas.
+- **Fontaine**: author of [SPT Stance Overhaul](https://sp-mod.com/mod/3136/spt-stance-overhaul) and the stance system in SPT Realism Mod. Tactical Stances was inspired by Fontaine's stances: its feature set (high ready, low ready, active aim, canted aim and the mechanics around them) follows that work. Full credit to Fontaine for those ideas.
 - **YoucefNabil**: author of the [Delirium physics engine](https://github.com/YoucefNabil/delirium-physics), which Euphoria Reactions runs on (`delirium_physics.dll`, GPL-3.0, under its own license).
 - **Get-up animations** generated with NVIDIA MotionBricks.
 - **Audio Library: Sound Effects** ([YouTube](https://www.youtube.com/@AudioLibrarySoundEffects)): breathing recordings.
