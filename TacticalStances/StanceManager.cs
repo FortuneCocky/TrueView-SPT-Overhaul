@@ -354,6 +354,9 @@ public static class StanceManager
         if (_camTransform == null && Camera.main != null)
             _camTransform = Camera.main.transform;
         UpdateBend(Time.deltaTime);
+        // Looking through a scope the eye must sit on its axis — no bend.
+        if (_pwa != null && _pwa.IsAiming)
+            _bendAngle = Vector2.zero;
 
         _bendLocal = Quaternion.identity;
         Transform parent = weaponRootAnim.parent;
@@ -388,14 +391,26 @@ public static class StanceManager
         Vector3 totalRot = (_currentRotOffset + _currentLeanSwapRot) * vis;
         // Scope clearance is a fail-safe, not part of the stance — never
         // faded by sprint suppression.
-        totalPos += ScopeClearance.LocalOffset(weaponRootAnim, _camTransform);
+        totalPos += ScopeClearance.LocalOffset(weaponRootAnim, _camTransform, _pwa != null && _pwa.IsAiming);
         bool hasOffset = totalPos != Vector3.zero || totalRot != Vector3.zero;
         bool usePivot = _gripLocalValid && !_sprinting;
         bool bendActive = !_sprinting && _bendLocal != Quaternion.identity;
 
         if (!hasOffset && !bendActive)
         {
-            // Nothing to add — leave the game's pose untouched.
+            // Nothing to add — leave the game's pose untouched. But if our
+            // last write is still sitting in the transform (the game doesn't
+            // rewrite WeaponRootAnim every frame in every state, e.g. prone
+            // ADS), put the game's base pose back first. Otherwise the last
+            // offset sticks and the next IK pass captures it as the base —
+            // which left the eye off the scope axis and the lens black.
+            if (_hasWritten
+                && (weaponRootAnim.localPosition - _lastWrittenPos).sqrMagnitude < 1e-12f
+                && Quaternion.Dot(weaponRootAnim.localRotation, _lastWrittenRot) > 0.9999999f)
+            {
+                weaponRootAnim.localPosition = _baseLocalPos;
+                weaponRootAnim.localRotation = _baseLocalRot;
+            }
             _hasWritten = false;
             return;
         }

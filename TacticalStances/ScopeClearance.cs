@@ -47,8 +47,11 @@ internal static class ScopeClearance
     /// The correction to add to WeaponRootAnim's local position (parent
     /// space, meters along the camera's down axis).
     /// </summary>
-    internal static Vector3 LocalOffset(Transform weaponRootAnim, Transform cam)
+    internal static Vector3 LocalOffset(Transform weaponRootAnim, Transform cam, bool aiming)
     {
+        // ADS: zero from the very first frame, in both passes.
+        if (aiming)
+            _amount = _target = _amountVel = 0f;
         if (_amount <= 0f || cam == null || weaponRootAnim == null || weaponRootAnim.parent == null)
             return Vector3.zero;
 
