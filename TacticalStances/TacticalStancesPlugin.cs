@@ -120,6 +120,7 @@ public class TacticalStancesPlugin : BaseUnityPlugin
     public static ConfigEntry<float> ScopeClearTrigger;
     public static ConfigEntry<float> ScopeClearMaxPush;
     public static ConfigEntry<float> ScopeClearMinSize;
+    public static ConfigEntry<bool> EnableProneScopeGuard;
 
     // === Internal balanced stamina constants (not exposed in config) ===
     // Low Ready: regen stamina 25% faster than vanilla (extra 5%)
@@ -242,6 +243,7 @@ public class TacticalStancesPlugin : BaseUnityPlugin
         ScopeClearTrigger = Config.Bind("l - Scope Clearance", "Trigger Coverage", 0.15f, new ConfigDescription("How far a sight may reach up into the clear zone (fraction of its height) before the weapon is pushed down. Lower = more sensitive.", new AcceptableValueRange<float>(0.02f, 0.8f), Array.Empty<object>()));
         ScopeClearMaxPush = Config.Bind("l - Scope Clearance", "Max Push (m)", 0.12f, new ConfigDescription("Furthest the weapon can be pushed down to clear the view.", new AcceptableValueRange<float>(0.02f, 0.3f), Array.Empty<object>()));
         ScopeClearMinSize = Config.Bind("l - Scope Clearance", "Min Sight Size", 0.06f, new ConfigDescription("Only sights that cover at least this fraction of the screen (big scopes close to the eye) are pushed out of view. Small sights like holos and red dots stay where they are. Raise to leave more sights alone.", new AcceptableValueRange<float>(0.005f, 0.4f), Array.Empty<object>()));
+        EnableProneScopeGuard = Config.Bind("l - Scope Clearance", "Prone Scope Guard", true, "While aiming prone, stops the game pulling the gun back when the barrel touches the ground, grass or your body. That pull moves the scope off your eye and blacks out the lens. A fully buried barrel still drops you out of ADS as normal.");
         BindStanceOffsets("k - Lean Shoulder Swap", out LeanSwapPosX, out LeanSwapPosY, out LeanSwapPosZ, out LeanSwapRotX, out LeanSwapRotY, out LeanSwapRotZ, new Vector3(-0.114f, -0.002816901f, -0.002816901f), new Vector3(0f, -1.126761f, 0f));
 
 
@@ -377,6 +379,9 @@ public class TacticalStancesPlugin : BaseUnityPlugin
         {
             StanceManager.Tick(localPlayer, Mathf.Min(Time.unscaledDeltaTime, 0.2f));
         }
+
+        // Stop the game's turn-away pull while aiming prone (black scope).
+        ProneScopeGuardPatch.Tick(localPlayer);
 
         // Deliver a deferred trigger press once the fire-return raise has
         // converged on the fire pose. After Tick, so a stance key pressed
