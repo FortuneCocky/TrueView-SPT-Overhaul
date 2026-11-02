@@ -23,8 +23,12 @@ internal static class ScopeClearance
     private static readonly Vector3[] _corners = new Vector3[8];
     private static int _sightSignature;
 
-    // 0 = no correction, 1 = full Max Push applied.
+    // 0 = no correction, 1 = full Max Push applied. The controller steps
+    // _target; _amount follows it through a critically damped spring so the
+    // push never starts or stops with a jolt.
     private static float _amount;
+    private static float _target;
+    private static float _amountVel;
 
     /// <summary>Last measured fraction of the clear zone covered by sights (0..1).</summary>
     internal static float Coverage { get; private set; }
@@ -32,6 +36,8 @@ internal static class ScopeClearance
     internal static void Reset()
     {
         _amount = 0f;
+        _target = 0f;
+        _amountVel = 0f;
         Coverage = 0f;
         _renderers.Clear();
         _sightSignature = 0;
@@ -59,9 +65,15 @@ internal static class ScopeClearance
     {
         if (!TacticalStancesPlugin.EnableScopeClearance.Value || pwa == null || pwa.IsAiming || suppressed)
         {
-            // ADS must sit exactly on the sight — drop the correction at once.
-            _amount = (pwa != null && pwa.IsAiming) ? 0f : Mathf.MoveTowards(_amount, 0f, 2f * dt);
             Coverage = 0f;
+            if (pwa != null && pwa.IsAiming)
+            {
+                // ADS must sit exactly on the sight — drop the correction at once.
+                _amount = _target = _amountVel = 0f;
+                return;
+            }
+            _target = Mathf.MoveTowards(_target, 0f, 2f * dt);
+            Follow(dt);
             return;
         }
 
@@ -72,11 +84,22 @@ internal static class ScopeClearance
         RefreshRenderers(pwa);
         Coverage = MeasureCoverage(cam);
 
+        // Soft edges: the push/release rate fades in over a band past each
+        // threshold instead of switching on at full speed, so a sight that
+        // just grazes the zone gets a gentle nudge rather than a jump.
         float trigger = TacticalStancesPlugin.ScopeClearTrigger.Value;
-        if (Coverage > trigger)
-            _amount = Mathf.MoveTowards(_amount, 1f, 4f * dt);
-        else if (Coverage < trigger * 0.4f)
-            _amount = Mathf.MoveTowards(_amount, 0f, 1.5f * dt);
+        float release = trigger * 0.4f;
+        float push = Mathf.SmoothStep(0f, 1f, (Coverage - trigger) / (trigger * 0.75f + 1e-4f));
+        float relax = Mathf.SmoothStep(0f, 1f, (release - Coverage) / (release + 1e-4f));
+        _target = Mathf.Clamp01(_target + (4f * push - 1.5f * relax) * dt);
+        Follow(dt);
+    }
+
+    private static void Follow(float dt)
+    {
+        if (dt <= 0f)
+            return;
+        _amount = Mathf.Clamp01(Mathf.SmoothDamp(_amount, _target, ref _amountVel, 0.12f, Mathf.Infinity, dt));
     }
 
     // Rebuild the renderer list only when the set of aim points changes
