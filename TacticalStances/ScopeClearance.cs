@@ -7,14 +7,15 @@ namespace TacticalStances;
 /// <summary>
 /// Fail-safe that keeps mounted sights out of the middle of the screen when
 /// not aiming. Every frame the optic renderers (taken from the game's own
-/// aim-point list, so any scope/red dot/magnifier is covered) are projected
-/// to the screen; if they cover too much of a central zone, the weapon is
-/// pushed down along the camera's down axis until the zone is clear again.
+/// aim-point list, so any scope/red dot/magnifier is covered) are measured
+/// in camera space, and the weapon is pushed down along the camera's down
+/// axis just far enough that their top edge sits below a central zone.
 ///
-/// Pure feedback loop with hysteresis — it measures the pose it already
-/// corrected, rises while covered, holds inside the band, and only lets go
-/// once the scope is well clear — so it works in every stance and with any
-/// stance tuning without knowing the weapon geometry up front.
+/// The push is solved directly from the un-pushed pose (the push we applied
+/// is added back before measuring), not by nudging until the screen looks
+/// clear — so there is no feedback loop to hunt or bounce, even close to
+/// the camera in Low Ready. The result is eased with a critically damped
+/// spring so the gun glides rather than steps.
 /// </summary>
 internal static class ScopeClearance
 {
@@ -23,22 +24,15 @@ internal static class ScopeClearance
     private static readonly Vector3[] _corners = new Vector3[8];
     private static int _sightSignature;
 
-    // 0 = no correction, 1 = full Max Push applied. The controller steps
-    // _target; _amount follows it through a critically damped spring so the
-    // push never starts or stops with a jolt.
-    private static float _amount;
-    private static float _target;
-    private static float _amountVel;
-
-    /// <summary>Last measured fraction of the clear zone covered by sights (0..1).</summary>
-    internal static float Coverage { get; private set; }
+    // Meters along the camera's down axis: currently applied, and the
+    // solved amount it is easing toward.
+    private static float _push;
+    private static float _targetPush;
+    private static float _pushVel;
 
     internal static void Reset()
     {
-        _amount = 0f;
-        _target = 0f;
-        _amountVel = 0f;
-        Coverage = 0f;
+        _push = _targetPush = _pushVel = 0f;
         _renderers.Clear();
         _sightSignature = 0;
     }
@@ -51,58 +45,41 @@ internal static class ScopeClearance
     {
         // ADS: zero from the very first frame, in both passes.
         if (aiming)
-            _amount = _target = _amountVel = 0f;
-        if (_amount <= 0f || cam == null || weaponRootAnim == null || weaponRootAnim.parent == null)
+            _push = _targetPush = _pushVel = 0f;
+        if (_push <= 0f || cam == null || weaponRootAnim == null || weaponRootAnim.parent == null)
             return Vector3.zero;
 
-        float t = Mathf.SmoothStep(0f, 1f, _amount);
-        Vector3 world = -cam.up * (TacticalStancesPlugin.ScopeClearMaxPush.Value * t);
-        return weaponRootAnim.parent.InverseTransformVector(world);
+        return weaponRootAnim.parent.InverseTransformVector(-cam.up * _push);
     }
 
     /// <summary>
-    /// Measures the pose just written and steps the correction for next
-    /// frame. Called once per frame from the visual pass.
+    /// Solves the push for the pose just drawn and eases toward it. Called
+    /// once per frame from the visual pass.
     /// </summary>
     internal static void Update(ProceduralWeaponAnimation pwa, bool suppressed, float dt)
     {
-        if (!TacticalStancesPlugin.EnableScopeClearance.Value || pwa == null || pwa.IsAiming || suppressed)
+        if (pwa != null && pwa.IsAiming)
         {
-            Coverage = 0f;
-            if (pwa != null && pwa.IsAiming)
-            {
-                // ADS must sit exactly on the sight — drop the correction at once.
-                _amount = _target = _amountVel = 0f;
-                return;
-            }
-            _target = Mathf.MoveTowards(_target, 0f, 2f * dt);
-            Follow(dt);
+            _push = _targetPush = _pushVel = 0f;
             return;
         }
 
         Camera cam = Camera.main;
-        if (cam == null)
-            return;
+        if (!TacticalStancesPlugin.EnableScopeClearance.Value || pwa == null || suppressed || cam == null)
+        {
+            _targetPush = 0f;
+        }
+        else
+        {
+            RefreshRenderers(pwa);
+            _targetPush = Mathf.Min(SolvePush(cam), TacticalStancesPlugin.ScopeClearMaxPush.Value);
+        }
 
-        RefreshRenderers(pwa);
-        Coverage = MeasureCoverage(cam);
-
-        // Soft edges: the push/release rate fades in over a band past each
-        // threshold instead of switching on at full speed, so a sight that
-        // just grazes the zone gets a gentle nudge rather than a jump.
-        float trigger = TacticalStancesPlugin.ScopeClearTrigger.Value;
-        float release = trigger * 0.4f;
-        float push = Mathf.SmoothStep(0f, 1f, (Coverage - trigger) / (trigger * 0.75f + 1e-4f));
-        float relax = Mathf.SmoothStep(0f, 1f, (release - Coverage) / (release + 1e-4f));
-        _target = Mathf.Clamp01(_target + (4f * push - 1.5f * relax) * dt);
-        Follow(dt);
-    }
-
-    private static void Follow(float dt)
-    {
         if (dt <= 0f)
             return;
-        _amount = Mathf.Clamp01(Mathf.SmoothDamp(_amount, _target, ref _amountVel, 0.12f, Mathf.Infinity, dt));
+        // Slightly quicker to get out of the way than to come back.
+        float smooth = _targetPush > _push ? 0.12f : 0.25f;
+        _push = Mathf.Max(0f, Mathf.SmoothDamp(_push, _targetPush, ref _pushVel, smooth, Mathf.Infinity, dt));
     }
 
     // Rebuild the renderer list only when the set of aim points changes
@@ -134,18 +111,24 @@ internal static class ScopeClearance
         }
     }
 
-    // Fraction of the central clear zone covered by the union of the sight
-    // renderers' oriented bounds, in viewport space.
-    private static float MeasureCoverage(Camera cam)
+    // Meters of downward push needed so every sight renderer that overlaps
+    // the zone horizontally has its top below the zone's lower edge (less
+    // the allowed intrusion). Measured with the current push removed.
+    private static float SolvePush(Camera cam)
     {
+        float tanV = Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
+        float tanH = tanV * cam.aspect;
+
         float halfW = TacticalStancesPlugin.ScopeClearZone.Value * 0.5f;
         float halfH = Mathf.Min(0.5f, halfW * cam.aspect);   // square in pixels
-        float zMinX = 0.5f - halfW, zMaxX = 0.5f + halfW;
-        float zMinY = 0.5f - halfH, zMaxY = 0.5f + halfH;
+        // Viewport-space offsets from screen centre.
+        float zoneHalfX = halfW;
+        float allowed = TacticalStancesPlugin.ScopeClearTrigger.Value * 2f * halfH;
+        float floorY = -halfH + allowed;                      // top of sights must sit below this
 
-        float minX = float.MaxValue, minY = float.MaxValue;
-        float maxX = float.MinValue, maxY = float.MinValue;
-        bool any = false;
+        Transform ct = cam.transform;
+        float near = cam.nearClipPlane;
+        float needed = 0f;
 
         for (int i = 0; i < _renderers.Count; i++)
         {
@@ -162,28 +145,34 @@ internal static class ScopeClearance
                     for (int z = -1; z <= 1; z += 2)
                         _corners[n++] = m.MultiplyPoint3x4(c + Vector3.Scale(e, new Vector3(x, y, z)));
 
+            // Horizontal extent on screen (unaffected by a vertical push).
+            float minX = float.MaxValue, maxX = float.MinValue;
+            bool behind = false;
             for (int k = 0; k < 8; k++)
             {
-                Vector3 v = cam.WorldToViewportPoint(_corners[k]);
-                // A sight reaching behind the near plane is right in the
-                // player's face — treat the zone as fully blocked.
-                if (v.z < cam.nearClipPlane)
-                    return 1f;
-                if (v.x < minX) minX = v.x;
-                if (v.x > maxX) maxX = v.x;
-                if (v.y < minY) minY = v.y;
-                if (v.y > maxY) maxY = v.y;
-                any = true;
+                Vector3 p = ct.InverseTransformPoint(_corners[k]);
+                _corners[k] = p;
+                if (p.z <= near) { behind = true; continue; }
+                float vx = p.x / (2f * p.z * tanH);
+                if (vx < minX) minX = vx;
+                if (vx > maxX) maxX = vx;
+            }
+            if (behind)
+                return float.MaxValue;   // sight reaching past the near plane — push all the way
+            if (maxX < -zoneHalfX || minX > zoneHalfX)
+                continue;
+
+            for (int k = 0; k < 8; k++)
+            {
+                Vector3 p = _corners[k];
+                float y = p.y + _push;                       // remove our own push
+                float limit = floorY * 2f * p.z * tanV;      // camera-space y of the zone floor at this depth
+                if (y - limit > needed)
+                    needed = y - limit;
             }
         }
 
-        if (!any)
-            return 0f;
-
-        float ox = Mathf.Min(maxX, zMaxX) - Mathf.Max(minX, zMinX);
-        float oy = Mathf.Min(maxY, zMaxY) - Mathf.Max(minY, zMinY);
-        if (ox <= 0f || oy <= 0f)
-            return 0f;
-        return (ox * oy) / ((zMaxX - zMinX) * (zMaxY - zMinY));
+        // Ignore sub-3mm corrections so a sight resting on the edge doesn't twitch.
+        return needed < 0.003f ? 0f : needed;
     }
 }
