@@ -386,6 +386,9 @@ public static class StanceManager
         float vis = 1f - _suppress;
         Vector3 totalPos = (_currentPosOffset + _currentLeanSwapPos) * vis;
         Vector3 totalRot = (_currentRotOffset + _currentLeanSwapRot) * vis;
+        // Scope clearance is a fail-safe, not part of the stance — never
+        // faded by sprint suppression.
+        totalPos += ScopeClearance.LocalOffset(weaponRootAnim, _camTransform);
         bool hasOffset = totalPos != Vector3.zero || totalRot != Vector3.zero;
         bool usePivot = _gripLocalValid && !_sprinting;
         bool bendActive = !_sprinting && _bendLocal != Quaternion.identity;
@@ -500,6 +503,11 @@ public static class StanceManager
     public static void ApplyStanceOffsetForVisual(Transform weaponRootAnim)
     {
         WritePose(weaponRootAnim);
+
+        // Measure the pose just drawn and step the scope clearance for the
+        // next frame — once per frame, here in the visual pass only.
+        bool suppressed = !TacticalStancesPlugin.EnableStances.Value || _sprinting || _suppress > 0.5f;
+        ScopeClearance.Update(_pwa, suppressed, Time.deltaTime);
     }
 
     private static void SmoothVec(ref Vector3 current, ref Vector3 velocity, Vector3 target, float speed, float dt)
@@ -560,6 +568,7 @@ public static class StanceManager
         _hasWritten = false;
         _bendLocal = Quaternion.identity;
         TriggerHoldPatch.Clear();
+        ScopeClearance.Reset();
     }
 
     private static void ResetOffsets()
