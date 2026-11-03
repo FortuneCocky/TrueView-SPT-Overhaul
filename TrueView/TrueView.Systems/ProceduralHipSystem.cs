@@ -466,9 +466,9 @@ internal static class ProceduralHipSystem
             _weaponRot = Quaternion.Euler(pitchDrift, yawDrift, 0f) * _weaponRot;
         }
 
-        float baseZone = Mathf.Max(0.1f, EffectiveZoneDegrees(isAiming
+        float baseZone = Mathf.Max(0.1f, EffectiveZoneDegrees(FieldOfViewSystem.ScaleZone(isAiming
             ? HandlingConfig.DeadzoneAds.Value
-            : HandlingConfig.HipCameraFollowZone.Value));
+            : HandlingConfig.HipCameraFollowZone.Value)));
         float maxWeaponLag = baseZone;
         // Turn range expansion — the cone widens with turn speed so the gun
         // can sweep far past its resting deadzone mid-turn ("bend the gun around
@@ -482,7 +482,7 @@ internal static class ProceduralHipSystem
         // Hard ceiling — expanded or not, the weapon never leaves the frame.
         // ~22° hip keeps the muzzle visible near screen edge at typical FOVs;
         // 9° in ADS keeps the optic picture readable.
-        maxWeaponLag = Mathf.Min(maxWeaponLag, Mathf.Max(baseZone, isAiming ? 9f : 22f));
+        maxWeaponLag = Mathf.Min(maxWeaponLag, Mathf.Max(baseZone, FieldOfViewSystem.ScaleZone(isAiming ? 9f : 22f)));
         if (HandlingConfig.HardDeadzone.Value) maxWeaponLag = baseZone;
         _zoneDeg = baseZone;
         _lagYaw = Mathf.DeltaAngle(0f, (Quaternion.Inverse(target) * _weaponRot).eulerAngles.y);
@@ -497,7 +497,7 @@ internal static class ProceduralHipSystem
         // up or down doesn't leave the gun parked low in the frame. Left and
         // right keep the full cone.
         float pitchLimit = isAiming ? float.MaxValue
-            : EffectiveZoneDegrees(HandlingConfig.HipVerticalFollow?.Value ?? 5.5f);
+            : EffectiveZoneDegrees(FieldOfViewSystem.ScaleZone(HandlingConfig.HipVerticalFollow?.Value ?? 5.5f));
         if (pitchLimit < maxWeaponLag)
         {
             float restraintT = 1f - Mathf.Exp(-18f * Mathf.Min(deltaTime, 1f / 30f));

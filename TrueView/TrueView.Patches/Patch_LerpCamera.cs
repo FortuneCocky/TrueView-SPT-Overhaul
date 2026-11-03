@@ -77,7 +77,8 @@ internal class Patch_LerpCamera : ModulePatch
         // forward axis = view direction, closest thing to the face plane.
         Vector3 rel = cam.position - head.position;
         float fwd = Vector3.Dot(rel, cam.forward);
-        const float minForward = 0.02f;
+        // Camera pull-back moves the hip view back on purpose; leave it room.
+        float minForward = 0.02f - FieldOfViewSystem.PullBackMeters;
         if (fwd < minForward)
         {
             cam.position += cam.forward * (minForward - fwd);

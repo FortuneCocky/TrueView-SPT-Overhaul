@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace TacticalStances;
 
-[BepInPlugin("com.devin.tacticalstances", "Tactical Stances", "1.3.0")]
+[BepInPlugin("com.devin.tacticalstances", "Tactical Stances", "1.3.1")]
 public class TacticalStancesPlugin : BaseUnityPlugin
 {
     public static ManualLogSource Log;
@@ -205,7 +205,7 @@ public class TacticalStancesPlugin : BaseUnityPlugin
         WeightReferenceKg = Config.Bind(ws, "Reference Weight (kg)", 4f, new ConfigDescription("Weapon weight that maps to 1.0x drain — roughly a typical rifle.", new AcceptableValueRange<float>(1f, 10f), Array.Empty<object>()));
         WeightMinMul = Config.Bind(ws, "Min Weight Multiplier", 0.3f, new ConfigDescription("Drain multiplier floor for the lightest weapons.", new AcceptableValueRange<float>(0.05f, 1f), Array.Empty<object>()));
         WeightMaxMul = Config.Bind(ws, "Max Weight Multiplier", 2f, new ConfigDescription("Drain multiplier cap for the heaviest weapons (LMGs).", new AcceptableValueRange<float>(1f, 4f), Array.Empty<object>()));
-        SwapTime = Config.Bind(ws, "Swap Time", 1f, new ConfigDescription("Weapon draw/holster speed. 1.0 = natural rate for a ~4kg rifle; lower = faster, higher = slower. Weapon weight scales it on top — a 9kg LMG takes ~2.25x your set time, a 1kg pistol ~0.25x.", new AcceptableValueRange<float>(0.2f, 3f), Array.Empty<object>()));
+        SwapTime = Config.Bind(ws, "Swap Time", 1f, new ConfigDescription("Weapon draw/holster speed. 1.0 = natural rate for a ~4kg built rifle; lower = faster, higher = slower. The full gun's weight (attachments, mag and ammo included) scales it on top: a ~1kg pistol draws about 2x faster than a rifle, a 12kg LMG about 1.5x slower. Always capped between 0.4x and 1.3x of the game's own draw speed.", new AcceptableValueRange<float>(0.2f, 3f), Array.Empty<object>()));
 
 
 

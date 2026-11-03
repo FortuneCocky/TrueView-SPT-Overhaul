@@ -42,12 +42,13 @@ Your weapon stops being glued to the centre of the screen.
 - **Turn-in-place footwork.** Small turns twist your torso. Bigger ones make your feet step, with a weight-scaled dip. Heavy gear makes the step slower and heavier.
 - **Landing and crouch dips.** The camera dips when you land from a fall (harder the further you fell) and when you crouch.
 - **Focus zoom.** A subtle tunnel-vision zoom when you settle on a target while aiming (off while mounted).
+- **Field of view (optional, off by default).** A field of view slider that goes past the game's limit of 75, up to 110. Sprinting, aiming and scopes still work from your new FOV. Camera pull-back sliders move your view back from the gun so you see more of it, at the hip and with iron sights or red dots.
 
 ## ❤️ TrueView — stress and injury
 
 - **Adrenaline.** Taking hits or hearing gunfire nearby raises adrenaline. It causes a slight hand tremor and a tunnel-vision pinch, then decays over several seconds. Being shot at brings a soft, slow heartbeat you feel in your chest; getting hit spikes it to a loud, fast one that slows down as you calm.
 - **Near misses.** A round passing close makes you flinch away from the side it passed, harder the closer it came, and raises adrenaline. Custom whiz sounds can replace the game's flyby sound.
-- **Breathing.** You hear and feel breathing that matches your stamina, from calm nose breathing to heavy panting after a sprint. Holding your breath silences it.
+- **Breathing.** You hear and feel breathing that matches your stamina, from calm nose breathing to heavy panting after a sprint. Holding your breath takes a breath in and silences it; letting go blows it out, harder after a long hold.
 - **Calming down.** After a fight, heavy breathing slowly settles into nose breathing: a short calm-down after a distant shot, a long one after a real firefight. A fresh hit or nearby fire cuts straight back to heavy breathing.
 - **Injuries matter.** Wounded arms shake and slow your handling. Crippled legs force a limp.
 - **Tired arms.** Sway grows as arm stamina drains, steeply near empty, and below about a third your arms start to tremble. Holding your breath steadies them.
@@ -75,6 +76,7 @@ Carry your weapon like an operator instead of always having it shouldered.
 - **Trigger discipline (optional).** Blocks firing in Low or High Ready so stances actually matter.
 - **Lean shoulder swap.** The weapon moves to your left shoulder when you lean left.
 - **Pistol stances.** Sidearms get their own poses.
+- **Weapon swap speed.** Drawing a gun takes longer the heavier it is as carried, with its attachments, mag and ammo.
 - **Arm stamina.** Holding a stance drains or restores stamina based on weapon weight. LMGs are heavy, pistols are cheap.
 - **Stance bonuses.** Each stance has its own configurable perks (sprint acceleration, move speed, ADS move speed, recoil).
 - **Your stance is remembered** between raids.

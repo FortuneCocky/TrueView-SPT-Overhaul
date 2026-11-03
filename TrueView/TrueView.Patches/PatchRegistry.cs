@@ -24,6 +24,10 @@ internal static class PatchRegistry
 			(ModulePatch)(object)new Patch_VisualPass(),
 			(ModulePatch)(object)new Patch_ReloadSpeed(),
 			(ModulePatch)(object)new Patch_QuickReloadSpeed(),
+			(ModulePatch)(object)new Patch_SetFov(),
+			(ModulePatch)(object)new Patch_AdsPullBack(),
+			(ModulePatch)(object)new Patch_ApplyFoV(),
+			(ModulePatch)(object)new Patch_CalculateScaleValueByFov(),
 
 			(ModulePatch)(object)new Patch_CustomItemSkinSetIsCustom(),
 			(ModulePatch)(object)new Patch_CustomItemSkinProceed()

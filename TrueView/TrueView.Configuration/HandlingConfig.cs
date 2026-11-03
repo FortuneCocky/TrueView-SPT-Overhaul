@@ -162,6 +162,11 @@ internal static class HandlingConfig
 	public static ConfigEntry<bool> FlybyEnabled { get; private set; }
 	public static ConfigEntry<float> FlybyVolume { get; private set; }
 	public static ConfigEntry<float> FlybyFlinchStrength { get; private set; }
+	public static ConfigEntry<bool> FovOverride { get; private set; }
+	public static ConfigEntry<int> FieldOfView { get; private set; }
+	public static ConfigEntry<bool> FovScalesDeadzone { get; private set; }
+	public static ConfigEntry<float> CameraPullBack { get; private set; }
+	public static ConfigEntry<float> AdsPullBack { get; private set; }
 	public static ConfigEntry<bool> DynamicFovEnabled { get; private set; }
 	public static ConfigEntry<float> DynamicFovAds { get; private set; }
 
@@ -286,6 +291,11 @@ internal static class HandlingConfig
 		ShotBreathPenalty = config.Bind("07 - Recoil & Shot Response", "Accuracy loss per shot", 0.95f, D("Multiplier on the vanilla breath amplitude gain applied per shot.", 0f, 3f, true));
 		StaminaShotInfluence = config.Bind("07 - Recoil & Shot Response", "Stamina recoil influence", 3f, D("How much drained hands stamina increases shot misalignment and recoil shake.", 0f, 3f, true));
 		DisableTrueViewRecoil = config.Bind("07 - Recoil & Shot Response", "Disable TrueView recoil", false, Toggle("Turns off every recoil effect TrueView adds, in one switch: Shot jolt, Hand kick and shot misalignment (with its accuracy loss and stamina influence). Their own settings are kept for when you switch this back off. Only TrueView's extras are removed; the game's own recoil always plays as normal."));
+		FovOverride = config.Bind("09 - Field of View", "Override game FOV", false, Toggle("Use the Field of view slider below instead of the game's own setting (which stops at 75). Off = the game's setting, untouched. The game's own changes still play from your new FOV: sprinting narrows it by 10, iron sights and red dots zoom in by the usual amount, and magnified optics keep their own view. Focus zoom and the adrenaline pinch scale with it, and the arms are pulled in the way the game does at 75."));
+		FieldOfView = config.Bind("09 - Field of View", "Field of view", 75, new ConfigDescription("Hip-fire field of view in degrees (vertical, like the game's setting), used while Override game FOV is on. 75 = the game's widest; 85-95 = a wider look; above 100 the edges stretch.", new AcceptableValueRange<int>(50, 110), new ConfigurationManagerAttributes { Order = 900 }));
+		FovScalesDeadzone = config.Bind("09 - Field of View", "Deadzone follows FOV", false, new ConfigDescription("Off (default): the deadzone, weapon lag and vertical follow stay in real degrees, so the gun aims and trails the same at any FOV; at a wider FOV it just looks smaller on screen. On: they are resized so the gun moves across the screen as far as it did at the game's own FOV setting (more degrees when wider, fewer when narrower). Needs Override game FOV.", null, new ConfigurationManagerAttributes { Order = 800 }));
+		CameraPullBack = config.Bind("09 - Field of View", "Camera pull-back (cm)", 0f, new ConfigDescription("Moves your view back from the gun at the hip so you see more of the gun and arms, like a camera offset. Works with or without Override game FOV. Aiming down sights is not affected: the sight picture stays exact. 0 = the game's position, 4 = a little more gun, 10 = a lot.", new AcceptableValueRange<float>(0f, 15f), new ConfigurationManagerAttributes { Order = 950 }));
+		AdsPullBack = config.Bind("09 - Field of View", "ADS pull-back (cm)", 0f, new ConfigDescription("The same as Camera pull-back, but while aiming down sights: your eye sits further back from the sight, so you see more of the gun around it. Only works with Enable dynamic FOV (15 - Combat Feedback) off. Iron sights, red dots and 1x optics only; it fades out through magnified scopes so their picture stays right. 0 = the game's position, 4 = a little more gun, 10 = a lot.", new AcceptableValueRange<float>(0f, 15f), new ConfigurationManagerAttributes { Order = 940 }));
 		CameraLagEnabled = config.Bind("08 - Camera Sway", "Enable camera lag", false, Toggle("The head/camera trails the weapon's sway instead of sitting rigidly on it."));
 		CameraSwayFollow = config.Bind("08 - Camera Sway", "Sway follow amount", 0.4037559f, D("Fraction of the weapon sway the camera drifts after.", 0f, 1f, true));
 		CameraSwayFollowSpeed = config.Bind("08 - Camera Sway", "Sway follow speed", 11.8f, D("How fast the camera catches up with the weapon sway. Lower lags further behind.", 0.5f, 20f, true));

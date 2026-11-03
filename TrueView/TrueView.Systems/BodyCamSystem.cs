@@ -3,15 +3,24 @@ using TrueView.Configuration;
 using TrueView.Core;
 using TrueView.Utilities;
 using UnityEngine;
+using UnityEngine.LowLevel;
+using UnityEngine.PlayerLoop;
 
 namespace TrueView.Systems;
 
 /// <summary>
 /// Chest-mounted body camera. Builds one camera-space offset from player
 /// inputs only (turn rate, gait phase, shots, hits, breathing) and adds it to
-/// the main camera right before it renders, then puts the camera back right
-/// after. The game, the weapon and the deadzone never see the offset, so it
-/// cannot feed back into the hands — the gun simply moves in the frame.
+/// the main camera after every script's LateUpdate, then puts the camera back
+/// at the very start of the next frame. The game, the weapon and the deadzone
+/// never see the offset, so it cannot feed back into the hands — the gun
+/// simply moves in the frame.
+///
+/// The offset stays on for the whole render, post-processing included: TAA,
+/// upscalers and motion vectors all read the camera at different points of
+/// the render, and a camera that moved and moved back inside one frame left
+/// them reprojecting history from the wrong pose (ghosted, smeared, darker
+/// grass and trees).
 /// </summary>
 internal static class BodyCamSystem
 {
@@ -41,11 +50,16 @@ internal static class BodyCamSystem
     // --- Render-time application ---
     private static bool _installed;
     private static bool _applied;
-    private static int _appliedFrame;
     private static Camera _appliedCamera;
     private static Vector3 _savedPos;
     private static Quaternion _savedRot;
+    private static Vector3 _writtenPos;
+    private static Quaternion _writtenRot;
     private static bool _loggedApply;
+
+    // Player loop markers for the two steps below.
+    private struct BodyCamApply { }
+    private struct BodyCamRestore { }
 
     // --- Torso lag: the chest trails the mouse turn ---
     private static Vector2 _lag;
@@ -309,38 +323,61 @@ internal static class BodyCamSystem
     {
         if (_installed)
             return;
-        Camera.onPreCull += OnPreCull;
-        Camera.onPostRender += OnPostRender;
         _installed = true;
-        Log.Info("[BodyCam] render hook installed");
+        PlayerLoopSystem loop = PlayerLoop.GetCurrentPlayerLoop();
+        if (!InsertFirst(ref loop, typeof(PostLateUpdate), typeof(BodyCamApply), ApplyBeforeRender)
+            || !InsertFirst(ref loop, typeof(EarlyUpdate), typeof(BodyCamRestore), RestoreAtFrameStart))
+        {
+            Log.Warning("[BodyCam] could not hook the player loop, body camera off");
+            return;
+        }
+        PlayerLoop.SetPlayerLoop(loop);
+        Log.Info("[BodyCam] hooked: applied after LateUpdate, held through the render, removed at the start of the next frame");
     }
 
-    private static void OnPreCull(Camera cam)
+    // Puts a step at the front of one phase of the player loop.
+    private static bool InsertFirst(ref PlayerLoopSystem loop, System.Type phase, System.Type marker, PlayerLoopSystem.UpdateFunction step)
     {
-        // Post-render never came back. Same frame: undo before re-applying.
-        // A later frame: the game has already rewritten the camera pose
-        // (FirstPersonCameraState sets it every LateUpdate), so restoring the
-        // saved pose would drag the camera back a frame — just forget it.
-        if (_applied && Time.frameCount != _appliedFrame)
+        if (loop.subSystemList == null)
+            return false;
+        for (int i = 0; i < loop.subSystemList.Length; i++)
         {
-            _applied = false;
-            _appliedCamera = null;
+            if (loop.subSystemList[i].type != phase)
+                continue;
+            PlayerLoopSystem[] old = loop.subSystemList[i].subSystemList ?? new PlayerLoopSystem[0];
+            foreach (PlayerLoopSystem s in old)
+            {
+                if (s.type == marker)
+                    return true;
+            }
+            var list = new PlayerLoopSystem[old.Length + 1];
+            list[0] = new PlayerLoopSystem { type = marker, updateDelegate = step };
+            System.Array.Copy(old, 0, list, 1, old.Length);
+            loop.subSystemList[i].subSystemList = list;
+            return true;
         }
-        else if (_applied && cam == _appliedCamera)
-        {
-            Restore();
-        }
-        if (_applied || cam == null || cam != Camera.main)
-            return;
+        return false;
+    }
+
+    // After every LateUpdate (the game has placed the camera for this frame),
+    // before anything renders.
+    private static void ApplyBeforeRender()
+    {
+        if (_applied)
+            RestoreAtFrameStart();
         if (_pos.sqrMagnitude < 1e-12f && _euler.sqrMagnitude < 1e-8f)
+            return;
+        Camera cam = Camera.main;
+        if (cam == null)
             return;
 
         Transform t = cam.transform;
         _savedPos = t.position;
         _savedRot = t.rotation;
         t.SetPositionAndRotation(_savedPos + _savedRot * _pos, _savedRot * Quaternion.Euler(_euler));
+        _writtenPos = t.position;
+        _writtenRot = t.rotation;
         _appliedCamera = cam;
-        _appliedFrame = Time.frameCount;
         _applied = true;
 
         if (!_loggedApply)
@@ -350,24 +387,26 @@ internal static class BodyCamSystem
         }
     }
 
-    private static void OnPostRender(Camera cam)
+    // Start of the next frame, before any script runs: hand the game back its
+    // own camera pose. If something already moved the camera, leave it be.
+    private static void RestoreAtFrameStart()
     {
-        if (_applied && cam == _appliedCamera)
-            Restore();
-    }
-
-    private static void Restore()
-    {
-        if (_appliedCamera != null)
-            _appliedCamera.transform.SetPositionAndRotation(_savedPos, _savedRot);
-        _appliedCamera = null;
+        if (!_applied)
+            return;
         _applied = false;
+        Camera cam = _appliedCamera;
+        _appliedCamera = null;
+        if (cam == null)
+            return;
+        Transform t = cam.transform;
+        if ((t.position - _writtenPos).sqrMagnitude < 1e-10f && Quaternion.Dot(t.rotation, _writtenRot) > 0.9999999f)
+            t.SetPositionAndRotation(_savedPos, _savedRot);
     }
 
     public static void Reset()
     {
         if (_applied)
-            Restore();
+            RestoreAtFrameStart();
         _pos = Vector3.zero;
         _euler = Vector3.zero;
         _adsBlend = 0f;

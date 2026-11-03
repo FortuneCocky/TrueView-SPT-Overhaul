@@ -42,6 +42,7 @@ internal static class HandlingManager
             return;
         }
         TickSystems(player, dt);
+        FieldOfViewSystem.Tick(player);
         // Last, after every input it reads has updated — and every frame, so
         // free look, inventory or a disabled mod let the camera settle back.
         BodyCamSystem.Tick(player, dt);

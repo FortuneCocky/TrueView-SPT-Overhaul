@@ -26,7 +26,9 @@ namespace TrueView.Systems;
 /// adrenaline is still up and stretches while stamina is low. A new trigger
 /// during it cuts straight back to heavy breathing.
 ///
-/// Holding breath silences all of it. Each loop is stopped outright once it
+/// Holding breath silences all of it, with a deep breath in as you start
+/// holding and the breath blown out when you let go (harder the longer you
+/// held). Each loop is stopped outright once it
 /// has faded to zero, and a watchdog on the audio object fades everything out
 /// if the handling tick stops (menus, inventory, death, raid end), so no
 /// loop can be left running.
@@ -35,7 +37,8 @@ namespace TrueView.Systems;
 /// <see cref="Phase"/> and <see cref="Depth"/>; AdrenalineSystem reads
 /// <see cref="HeartRateMod"/> and <see cref="HeartMask"/>.
 ///
-/// Clips: BepInEx/plugins/TrueView/audio/breath_*.wav (16-bit PCM).
+/// Clips: BepInEx/plugins/TrueView/audio/breath_*.wav (16-bit PCM). The hold
+/// breath pair (breath_hold_in/out.wav) is optional.
 /// </summary>
 internal static class BreathingSystem
 {
@@ -55,10 +58,29 @@ internal static class BreathingSystem
         public float Pitch = 1f;         // live multiplier (the calm-down slows the nose loop)
     }
 
-    private static readonly Layer Running = new() { File = "breath_running.wav", TrimStart = 0.5f, TrimEnd = 23.5f, Gain = 0.9f, FadeIn = 0.6f, FadeOut = 1.2f };
-    private static readonly Layer DeepFast = new() { File = "breath_deep_fast.wav", TrimStart = 0.25f, TrimEnd = 7.5f, Gain = 0.8f, FadeIn = 1.2f, FadeOut = 2.5f };
-    private static readonly Layer Nose = new() { File = "breath_nose.wav", TrimStart = 0.5f, TrimEnd = 25f, Gain = 0.45f, FadeIn = 1.5f, FadeOut = 2f };
+    private static readonly Layer Running = new() { File = "breath_running.wav", TrimStart = 0.5f, TrimEnd = 23.5f, Gain = 0.65f, FadeIn = 0.6f, FadeOut = 1.2f };
+    // Loop points are picked so the breath rhythm carries across the seam:
+    // deep fast ending at 7.5 put two breaths 0.32 s apart at every loop
+    // (0.52-0.6 s everywhere else), heard as a double breath.
+    private static readonly Layer DeepFast = new() { File = "breath_deep_fast.wav", TrimStart = 0.25f, TrimEnd = 8.1f, Gain = 0.8f, FadeIn = 1.2f, FadeOut = 2.5f };
+    private static readonly Layer Nose = new() { File = "breath_nose.wav", TrimStart = 0.25f, TrimEnd = 25.25f, Gain = 0.45f, FadeIn = 1.5f, FadeOut = 2f };
     private static readonly Layer[] Layers = { Running, DeepFast, Nose };
+
+    // One-shots for holding breath.
+    private sealed class Shot
+    {
+        public string File;
+        public float Gain;
+        public float[] Data;
+        public int Rate;
+        public AudioClip Clip;
+    }
+
+    private static readonly Shot HoldIn = new() { File = "breath_hold_in.wav", Gain = 0.45f };
+    private static readonly Shot HoldOut = new() { File = "breath_hold_out.wav", Gain = 0.5f };
+    private static AudioSource _holdSource;
+    private static bool _wasHolding;
+    private static float _holdSince;
 
     private static bool _loaded, _loadFailed, _warnedNoCamera;
     private static GameObject _root;
@@ -247,12 +269,14 @@ internal static class BreathingSystem
 
         if (master <= 0f || !alive)
         {
+            _wasHolding = false;
             if (AnyPlaying()) StopAll();
             return;
         }
         if (!EnsureLoaded()) return;
 
         bool hold = HandlingState.IsHoldingBreath;
+        HoldBreathSound(hold, master);
         Drive(Running, run, master, dt, hold);
         bool handover = _state == State.CalmNose;
         Drive(DeepFast, deep, master, dt, hold, handover);
@@ -267,6 +291,43 @@ internal static class BreathingSystem
         _calmVolume = (HandlingConfig.CalmDownVolume?.Value ?? 0.6f) * Mathf.Lerp(0.55f, 1f, _calmIntensity);
         _calmSince = Time.time;
         Log.Info($"Breathing: heavy for {Time.time - _heavySince:0.0}s, handing over to calm-down nose breathing for ~{_calmTotal:0.0}s (adrenaline load {_load:0.0}, peak {_peak:0.00}, intensity {_calmIntensity:0.00}, fatigue {fatigue:0.00}, nose volume {_calmVolume:0.00})");
+    }
+
+    /// <summary>
+    /// The breath taken in as you start holding it, and blown out when you let
+    /// go: harder after a long hold, and cutting off the breath in if you let
+    /// go straight away.
+    /// </summary>
+    private static void HoldBreathSound(bool hold, float master)
+    {
+        if (hold == _wasHolding) return;
+        _wasHolding = hold;
+        if (hold)
+        {
+            _holdSince = Time.time;
+            PlayShot(HoldIn, 1f, master);
+        }
+        else
+        {
+            float held = Time.time - _holdSince;
+            PlayShot(HoldOut, Mathf.Lerp(0.55f, 1f, Mathf.Clamp01(held / 4f)), master);
+        }
+    }
+
+    private static void PlayShot(Shot shot, float scale, float master)
+    {
+        if (shot.Data == null) return;
+        if (_holdSource == null && !EnsureSources()) return;
+        if (!ClipValid(shot.Clip))
+        {
+            shot.Clip = AudioClip.Create(Path.GetFileNameWithoutExtension(shot.File), shot.Data.Length, 1, shot.Rate, false);
+            shot.Clip.SetData(shot.Data, 0);
+        }
+        _holdSource.Stop();
+        _holdSource.clip = shot.Clip;
+        _holdSource.pitch = UnityEngine.Random.Range(0.97f, 1.03f);
+        _holdSource.volume = Mathf.Clamp01(master * shot.Gain * scale);
+        _holdSource.Play();
     }
 
     private static void Drive(Layer l, float target, float master, float dt, bool fast, bool handover = false)
@@ -332,6 +393,7 @@ internal static class BreathingSystem
             l.Volume = 0f;
             if (l.Source != null && l.Source.isPlaying) l.Source.Stop();
         }
+        if (_holdSource != null && _holdSource.isPlaying) _holdSource.Stop();
     }
 
     private static bool EnsureSources()
@@ -359,6 +421,12 @@ internal static class BreathingSystem
             s.volume = 0f;
             l.Source = s;
         }
+        _holdSource = _root.AddComponent<AudioSource>();
+        RouteToGameMixer(_holdSource);
+        _holdSource.loop = false;
+        _holdSource.spatialBlend = 0f;
+        _holdSource.playOnAwake = false;
+        _holdSource.priority = 64;
         return true;
     }
 
@@ -410,6 +478,12 @@ internal static class BreathingSystem
             {
                 l.Data = LoadLoop(Path.Combine(dir, l.File), l.TrimStart, l.TrimEnd, out l.Rate);
                 l.Clip = MakeClip(l);
+            }
+            foreach (var shot in new[] { HoldIn, HoldOut })
+            {
+                string path = Path.Combine(dir, shot.File);
+                if (File.Exists(path)) shot.Data = WavFile.ReadMono(path, out shot.Rate);
+                else Log.Warning($"Breathing: {shot.File} not found, no hold breath sound");
             }
             _loaded = true;
             Log.Info($"Breathing audio loaded from {dir}");
@@ -511,6 +585,7 @@ internal static class BreathingSystem
         _calmLeft = _calmTotal = 0f;
         Nose.Pitch = 1f;
         _state = _pending = State.None;
+        _wasHolding = false;
         Depth = 0f;
         StopAll();
     }
