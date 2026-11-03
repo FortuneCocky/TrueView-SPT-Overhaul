@@ -103,7 +103,7 @@ Blood that is actual 3D geometry, not flat sprites. Every drop collides with the
 - **Exit spurts and ribbons.** Blood pours from wounds as one continuous rope of liquid that sags, thins, pinches off into beads and peels off side strands. Where it lands it pools, streaks along the floor or runs down the wall.
 - **Headshots** throw forked ribbons sideways across your view, with a dense cloud of drops. Close to a wall, they paint it with layered spatter, a dark core and drips that creep down for seconds.
 - **Brain matter.** Headshots can throw glossy chunks and skull chips that tumble, splat and slide down walls.
-- **Head dismemberment.** A killing headshot can tear out one side of the face (eye socket, cheekbone, jaws and teeth) or take the whole head, leaving a ragged wound or neck stump that pumps and drips. Helmets, masks and glasses fly off as separate pieces. It's visual only: the real items stay on the body.
+- **Head dismemberment.** A killing headshot can take off half the face or the whole head, leaving a ragged wound or neck stump that pumps and drips. Helmets, masks and glasses fly off as separate pieces. It's visual only: the real items stay on the body.
 - **Mist burst.** Every hit puffs a dense dark-red burst that tears into a web of fine strands and droplets within a fraction of a second.
 - **Spray.** Drops in realistic sizes (many tiny, a few heavy) that fall and splatter wherever they hit.
 
@@ -169,7 +169,6 @@ Bots react to being shot with their whole body, driven by a real-time physics si
 - **Fail-safes.** Any bot stuck, wedged or draped too long is put back into the nearest stance.
 - **Smooth at any frame rate.** The physics runs at 60 Hz and the body is interpolated between steps.
 - **Light on performance.** Every reacting bot's physics runs side by side on worker threads, and the map scan around a bot is cast in one batch.
-- **Works with amos's Euphoria Style Physics.** When both are installed, each bot belongs to one mod at a time: living stumbles, balance, falls and get-ups are ours; deaths, corpses, flinch and explosions are its.
 - **Every chance, force and timing is configurable.**
 
 ---
