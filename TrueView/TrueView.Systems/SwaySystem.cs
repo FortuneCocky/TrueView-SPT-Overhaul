@@ -23,12 +23,15 @@ internal static class SwaySystem
 			float stabTarget = isAiming && HandlingState.IsHoldingBreath ? 0.1f : 1f;
 			_breathStabilize = Mathf.Lerp(_breathStabilize, stabTarget, 1f - Mathf.Exp(-6f * Time.deltaTime));
 			float num = Fatigue();
+			// Through a magnified scope the game's own sway takes over (its
+			// values: breath x1, motion 0.45, no tremor).
+			float vanilla = isAiming ? ScopeOpticsSystem.Magnified : 0f;
 			float weightProgress = HandlingState.Stats.WeightProgress;
 			float num2 = (isAiming ? HandlingConfig.AimSwayMultiplier.Value : HandlingConfig.HipSwayMultiplier.Value);
 			float num3 = num2 * num * _breathStabilize;
 			if (animation.Breath != null)
 			{
-				animation.Breath.Intensity = animation.IntensityByPoseLevel * animation.IntensityByAiming * num3;
+				animation.Breath.Intensity = animation.IntensityByPoseLevel * animation.IntensityByAiming * Mathf.Lerp(num3, 1f, vanilla);
 				// Stance Overhaul balances hip sway per stance through this value.
 				if (!StanceOverhaulCompat.Installed)
 					animation.Breath.HipPenalty = HandlingConfig.HipSwayMultiplier.Value * (1f + 0.5f * weightProgress);
@@ -37,20 +40,21 @@ internal static class SwaySystem
 			{
 				// Tired arms also swing the gun further around when you move and turn.
 				float armsLoose = 1f + 0.4f * Mathf.Pow(1f - HandlingState.HandsStamina01, 2f);
-				animation.MotionReact.Intensity = 0.45f * HandlingConfig.MotionInertiaMultiplier.Value * (1f + 0.35f * weightProgress) * armsLoose * _breathStabilize;
+				float motion = 0.45f * HandlingConfig.MotionInertiaMultiplier.Value * (1f + 0.35f * weightProgress) * armsLoose * _breathStabilize;
+				animation.MotionReact.Intensity = Mathf.Lerp(motion, 0.45f, vanilla);
 			}
-			ApplyTremor(animation, num * _breathStabilize);
+			ApplyTremor(animation, num * _breathStabilize, 1f - vanilla);
 		}
 	}
 
-	private static void ApplyTremor(ProceduralWeaponAnimation animation, float fatigue)
+	private static void ApplyTremor(ProceduralWeaponAnimation animation, float fatigue, float keep)
 	{
 		if (animation.HandShakeEffector != null)
 		{
 			// Tired arms shake: nothing above ~35% arm stamina, then steeply worse toward empty.
 			float shaky = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.35f, 0f, HandlingState.HandsStamina01));
 			float arms = (HandlingConfig.ArmTremor?.Value ?? 0f) * shaky * _breathStabilize;
-			float num = 3f * HandlingConfig.TremorMultiplier.Value * fatigue + arms + AdrenalineSystem.TremorAdd;
+			float num = (3f * HandlingConfig.TremorMultiplier.Value * fatigue + arms + AdrenalineSystem.TremorAdd) * keep;
 			if (!(Mathf.Abs(num - _appliedTremor) < 0.01f))
 			{
 				_appliedTremor = num;

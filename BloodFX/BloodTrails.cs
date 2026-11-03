@@ -8,8 +8,9 @@ namespace BloodFX;
 /// smear that lays itself down from the landing blob along a meandering path, with
 /// ragged edges, a rounded wet head that advances over a fraction of a second and
 /// a tail end that thins out. The path is walked by raycasts when it lands, so it
-/// follows the surface and stops at a ledge. Shading is baked into vertex colours;
-/// all trails share one mesh and one draw call.
+/// follows the surface and stops at a ledge. A trail can also be laid live, sample by
+/// sample, under a landing point that is travelling (a rope of blood from a moving body).
+/// Shading is baked into vertex colours; all trails share one mesh and one draw call.
 /// </summary>
 internal sealed class BloodTrails
 {
@@ -17,12 +18,12 @@ internal sealed class BloodTrails
     {
         public float Start, Dur, Life, Width, H;
         public Color Col;
-        public int Count;
-        public bool Live;
+        public int Count, Serial;
+        public bool Live, Open;
     }
 
     private const int Samples = 32, Across = 5, Per = Samples * Across;
-    private const float Lift = 0.0015f, FadeTime = 10f, TickRate = 1f / 15f;
+    private const float Lift = 0.0015f, FadeTime = 10f, TickRate = 1f / 15f, LiveStep = 0.04f;
     private static readonly float[] AcrossF = { -1f, -0.5f, 0f, 0.5f, 1f };
     private static readonly float[] AcrossH = { 0f, 0.75f, 1f, 0.75f, 0f };
     private static readonly float[] AcrossTilt = { -1.4f, -0.5f, 0f, 0.5f, 1.4f };
@@ -36,7 +37,7 @@ internal sealed class BloodTrails
     private float[] _wl, _wr;
     private Vector3[] _v;
     private Color32[] _c;
-    private int _next, _live;
+    private int _next, _live, _serial;
     private float _nextTick;
 
     public BloodTrails(Transform parent, Material mat, int capacity, int mask)
@@ -103,11 +104,7 @@ internal sealed class BloodTrails
         _renderer.enabled = false;
     }
 
-    /// <param name="dir">Travel direction along the surface.</param>
-    /// <param name="start">When the blood reaches the surface (may be in the future).</param>
-    /// <param name="dur">Seconds for the smear to drag out to full length.</param>
-    /// <param name="wander">How much the path meanders (0 = dead straight, like a drip running down a wall).</param>
-    public void Add(Vector3 pos, Vector3 normal, Vector3 dir, float length, float width, Color col, float start, float dur, float life, float wander = 1f)
+    private int Take(float start, float dur, float life, float width, Color col, bool open)
     {
         int i = _next;
         _next = (_next + 1) % _t.Length;
@@ -120,6 +117,19 @@ internal sealed class BloodTrails
         tr.H = Mathf.Clamp(width * 0.18f, 0.002f, 0.006f);
         tr.Col = col;
         tr.Live = true;
+        tr.Open = open;
+        tr.Serial = ++_serial;
+        return i;
+    }
+
+    /// <param name="dir">Travel direction along the surface.</param>
+    /// <param name="start">When the blood reaches the surface (may be in the future).</param>
+    /// <param name="dur">Seconds for the smear to drag out to full length.</param>
+    /// <param name="wander">How much the path meanders (0 = dead straight, like a drip running down a wall).</param>
+    public void Add(Vector3 pos, Vector3 normal, Vector3 dir, float length, float width, Color col, float start, float dur, float life, float wander = 1f)
+    {
+        int i = Take(start, dur, life, width, col, false);
+        ref Trail tr = ref _t[i];
 
         // walk the path over the surface, meandering a little, until it runs out of ground
         float seed = Random.value * 100f, bend = Random.Range(-0.12f, 0.12f);
@@ -175,6 +185,73 @@ internal sealed class BloodTrails
         _nextTick = 0f;
     }
 
+    /// <summary>
+    /// Starts a streak laid live under a moving landing point. Returns its slot; <paramref name="serial"/>
+    /// tells it apart from whatever reuses the slot later. Grow it with <see cref="Extend"/>.
+    /// </summary>
+    public int Begin(Vector3 pos, Vector3 normal, float width, Color col, float life, float now, out int serial)
+    {
+        int i = Take(now, 0.1f, life, width, col, true);
+        ref Trail tr = ref _t[i];
+        serial = tr.Serial;
+        int b = i * Samples;
+        Vector3 side = Vector3.Cross(normal, Mathf.Abs(normal.y) < 0.9f ? Vector3.up : Vector3.right).normalized;
+        for (int k = 0; k < 2; k++)
+        {
+            _p[b + k] = pos;
+            _n[b + k] = normal;
+            _s[b + k] = side;
+            _wl[b + k] = _wr[b + k] = width * 0.25f;
+        }
+        tr.Count = 1;
+        Collapse(i, pos);
+        _nextTick = 0f;
+        return i;
+    }
+
+    /// <summary>
+    /// The landing point moved: lays the next bit of the streak. False when the streak is used up (or the
+    /// slot was reused), so the caller starts a fresh one.
+    /// </summary>
+    public bool Extend(int slot, int serial, Vector3 pos, Vector3 normal, float width, float now)
+    {
+        if (slot < 0 || slot >= _t.Length) return false;
+        ref Trail tr = ref _t[slot];
+        if (!tr.Live || !tr.Open || tr.Serial != serial) return false;
+        if (tr.Count >= Samples) return false;
+        int b = slot * Samples;
+        Vector3 last = _p[b + tr.Count - 1];
+        Vector3 d = pos - last;
+        float dist = d.magnitude;
+        if (dist < LiveStep) return true;
+        if (dist > 0.6f) return false;   // it jumped: that's another streak
+        Vector3 head = (d - normal * Vector3.Dot(d, normal));
+        if (head.sqrMagnitude < 1e-8f) return true;
+        head.Normalize();
+        Vector3 side = Vector3.Cross(normal, head).normalized;
+        int k = tr.Count;
+        float seed = tr.Serial * 0.37f;
+        _p[b + k] = pos;
+        _n[b + k] = normal;
+        _s[b + k] = side;
+        float rag = 0.35f;
+        float jagL = 1f - rag + rag * (Mathf.PerlinNoise(seed, k * 1.3f) + 0.6f * (Hash(seed + k) - 0.5f));
+        float jagR = 1f - rag + rag * (Mathf.PerlinNoise(seed + 9f, k * 1.3f) + 0.6f * (Hash(seed + 50f + k) - 0.5f));
+        float w = Mathf.Lerp(tr.Width, width, 0.5f);
+        tr.Width = w;
+        _wl[b + k] = w * 0.5f * jagL;
+        _wr[b + k] = w * 0.5f * jagR;
+        if (k == 1)
+        {
+            // the first sample faces the way the streak set off
+            _s[b] = side;
+            _wl[b] = _wr[b] = w * 0.3f;
+        }
+        tr.Count = k + 1;
+        tr.Start = now;   // the streak lives on from its last extension
+        return true;
+    }
+
     public void Tick(float now, Vector3 eye, bool haveEye)
     {
         if (_live == 0 || now < _nextTick) return;
@@ -194,6 +271,7 @@ internal sealed class BloodTrails
                 continue;
             }
             if (now < tr.Start) continue;
+            if (tr.Open && tr.Count < 2) continue;
             Build(i, now, left < FadeTime ? left / FadeTime : 1f, eye, haveEye);
             int b = i * Samples;
             for (int k = 0; k < tr.Count; k += 4)
@@ -220,9 +298,14 @@ internal sealed class BloodTrails
     {
         ref Trail tr = ref _t[i];
         int b = i * Samples, v = i * Per;
-        float x = Mathf.Clamp01((now - tr.Start) / tr.Dur);
-        // fast at first, then slows as the blood runs out
-        float headF = (1f - (1f - x) * (1f - x)) * (tr.Count - 1);
+        float headF;
+        if (tr.Open) headF = tr.Count - 1;
+        else
+        {
+            float x = Mathf.Clamp01((now - tr.Start) / tr.Dur);
+            // fast at first, then slows as the blood runs out
+            headF = (1f - (1f - x) * (1f - x)) * (tr.Count - 1);
+        }
         int hk = Mathf.Min(tr.Count - 2, (int)headF);
         float hf = headF - hk;
         Vector3 headP = Vector3.Lerp(_p[b + hk], _p[b + hk + 1], hf);

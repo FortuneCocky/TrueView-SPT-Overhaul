@@ -69,6 +69,7 @@ internal partial class NmBody : MonoBehaviour
         GunMarkers.Load(dir);
         CaptureInit(dir);
         _init = true;
+        NudgeDolls.Fill(); // spare nudge dolls, settled on a background thread before the first hit
     }
 
     // Behaviour tuning for the next shot or balance task (it is read when a task starts, so a change applies
@@ -83,7 +84,7 @@ internal partial class NmBody : MonoBehaviour
             return;
         }
         if (nm_load_task_params(file) < 0) EuphoriaPlugin.Log($"Delirium: balance preset {preset} - {LastError()}");
-        else EuphoriaPlugin.Log($"Delirium: balance preset {preset} ({Path.GetFileName(file)})");
+        else { EuphoriaPlugin.Log($"Delirium: balance preset {preset} ({Path.GetFileName(file)})"); NudgeDolls.Flush(); }
     }
 
     // ---------------------------------------------------------------- bones
@@ -504,12 +505,29 @@ internal partial class NmBody : MonoBehaviour
             var hits = _gHits;
             Array.Clear(floor, 0, floor.Length); // hy and hits are only read where floor is set
             Array.Clear(_gPatched, 0, _gPatched.Length);
+            // every ray below, cast together first (NmBodyBakeRays): the grid, its outer ring, the wall rays
+            BakeRaysClear();
+            for (int i = 0; i < size; i++)
+                for (int j = 0; j < size; j++)
+                    BakeRayAdd(feet + new Vector3((i - gridR) * GroundCell, 2.5f, (j - gridR) * GroundCell), Vector3.down, 8f, noChars);
+            int ringRays = _brFrom.Count;
+            for (float gx = -7f; gx <= 7.01f; gx += 0.5f)
+                for (float gz = -7f; gz <= 7.01f; gz += 0.5f)
+                    if (!(Mathf.Abs(gx) <= GroundNear && Mathf.Abs(gz) <= GroundNear))
+                        BakeRayAdd(feet + new Vector3(gx, 2.5f, gz), Vector3.down, 8f, noChars);
+            int wallRays = _brFrom.Count;
+            for (int i = 0; i < 24; i++)
+            {
+                Vector3 dir = Quaternion.Euler(0, i * 15f, 0) * Vector3.forward;
+                foreach (float h in BakeHeights) BakeRayAdd(feet + Vector3.up * h, dir, 6f, WorldMask);
+            }
+            BakeRaysCast();
             for (int i = 0; i < size; i++)
                 for (int j = 0; j < size; j++)
                 {
                     if (tris.Count / 3 > MaxTris) break;
                     Vector3 from = feet + new Vector3((i - gridR) * GroundCell, 2.5f, (j - gridR) * GroundCell);
-                    if (GroundSample(from, noChars, feet, baked, pos, tris, ref columns, out RaycastHit gh))
+                    if (GroundSample(from, noChars, feet, baked, pos, tris, ref columns, out RaycastHit gh, i * size + j))
                     { floor[i, j] = true; hy[i, j] = gh.point.y; hits[i, j] = gh; GroundPoints.Add(gh.point); }
                 }
             var patched = _gPatched;
@@ -563,13 +581,15 @@ internal partial class NmBody : MonoBehaviour
                     ground++;
                 }
             // the outer ring, per-point squares as before
+            int ring = ringRays;
             for (float gx = -7f; gx <= 7.01f; gx += 0.5f)
                 for (float gz = -7f; gz <= 7.01f; gz += 0.5f)
                 {
                     if (tris.Count / 3 > MaxTris) break;
                     if (Mathf.Abs(gx) <= GroundNear && Mathf.Abs(gz) <= GroundNear) continue;
+                    int ray = ring++;
                     Vector3 from = feet + new Vector3(gx, 2.5f, gz);
-                    if (!GroundSample(from, noChars, feet, baked, pos, tris, ref columns, out RaycastHit gh)) continue;
+                    if (!GroundSample(from, noChars, feet, baked, pos, tris, ref columns, out RaycastHit gh, ray)) continue;
                     GroundSquare(pos, tris, gh, 0.27f); // 0.54 m squares on a 0.5 m grid: overlap, no gaps
                     ground++;
                     GroundPoints.Add(gh.point);
@@ -594,9 +614,10 @@ internal partial class NmBody : MonoBehaviour
             for (int i = 0; i < 24 && tris.Count / 3 < MaxTris; i++)
             {
                 Vector3 dir = Quaternion.Euler(0, i * 15f, 0) * Vector3.forward;
+                int hk = 0;
                 foreach (float h in heights)
                 {
-                    if (!RayWorld(feet + Vector3.up * h, dir, 6f, out RaycastHit hit)) continue;
+                    if (!BakeRayHit(wallRays + i * heights.Length + hk++, out RaycastHit hit)) continue;
                     if (baked.Contains(hit.collider) || hit.distance < 0.3f || Mathf.Abs(hit.normal.y) > 0.75f) continue;
                     Vector3 n = hit.normal;
                     Vector3 r = Vector3.Cross(Vector3.up, n);
@@ -983,9 +1004,10 @@ internal partial class NmBody : MonoBehaviour
             try { _p.RemoveStateSpeedLimit(Player.ESpeedLimit.Shot); } catch { }
             _speedLimitApplied = false;
         }
-        // The gun stays in his hand through the stagger (handing it back to the animated weapon
-        // root left it hanging in the air at the aim point); it slips free as he collapses.
+        // The gun never goes back to the animated weapon root (it hung in the air at the aim point).
+        // In the agony he lets go of it to hold the wound; a death fall keeps it until he collapses.
         GunToHand();
+        if (_deathStyle == DeathStyle.Agony) DropOnDeath();
     }
 
     private enum DeathPhase { Stagger, Collapse, Writhe, Relax }
@@ -1003,6 +1025,12 @@ internal partial class NmBody : MonoBehaviour
     private void UpdateDying()
     {
         float now = Time.time;
+        // the gun he let go goes into the weapon body as soon as EFT has made it (a frame after he died)
+        if (_gunDropped && _gunBody == null && _gun != null && now >= _nextGunTry)
+        {
+            _nextGunTry = now + 0.05f;
+            GunToCorpse(out _);
+        }
         switch (_phase)
         {
             case DeathPhase.Stagger:
@@ -1075,7 +1103,7 @@ internal partial class NmBody : MonoBehaviour
         if (Time.time < _dyingSince + 2f || _corpse.Count == 0)
         {
             foreach (Rigidbody rb in _p.GetComponentsInChildren<Rigidbody>(true))
-                if (rb != null && !_corpse.Contains(rb)) { _corpse.Add(rb); _corpseWasKinematic[rb] = rb.isKinematic; }
+                if (rb != null && rb != _gunBody && !_corpse.Contains(rb)) { _corpse.Add(rb); _corpseWasKinematic[rb] = rb.isKinematic; }
         }
         foreach (Rigidbody rb in _corpse)
             if (rb != null && !rb.isKinematic) rb.isKinematic = true;
@@ -1413,8 +1441,30 @@ internal partial class NmBody : MonoBehaviour
         }
         if (_twins.Count > 0) SyncTwins();
         if (_gun == null || _gunDropped || _bones[20] == null) return;
-        if (_gunLocked) { ApplyGunLock(); return; }
-        _gun.SetPositionAndRotation(_bones[20].position - _gunHeldRot * _gripLocal, _gunHeldRot);
+        if (_gunLocked) ApplyGunLock();
+        else _gun.SetPositionAndRotation(_bones[20].position - _gunHeldRot * _gripLocal, _gunHeldRot);
+        TrackGunMotion();
+    }
+
+    // How the held gun is moving, so it leaves his hand with that motion when he lets go of it.
+    private Vector3 _gunLastPos, _gunVel, _gunSpin;
+    private Quaternion _gunLastRot;
+    private int _gunLastFrame = -10;
+
+    private void TrackGunMotion()
+    {
+        int frame = Time.frameCount;
+        float dt = Time.deltaTime;
+        if (_gunLastFrame == frame - 1 && dt > 1e-4f)
+        {
+            _gunVel = Vector3.Lerp(_gunVel, (_gun.position - _gunLastPos) / dt, 0.5f);
+            (_gun.rotation * Quaternion.Inverse(_gunLastRot)).ToAngleAxis(out float deg, out Vector3 axis);
+            if (deg > 180f) deg -= 360f;
+            Vector3 spin = float.IsInfinity(axis.x) || float.IsNaN(axis.x) ? Vector3.zero : axis * (deg * Mathf.Deg2Rad / dt);
+            _gunSpin = Vector3.Lerp(_gunSpin, spin, 0.5f);
+        }
+        else if (_gunLastFrame != frame) { _gunVel = Vector3.zero; _gunSpin = Vector3.zero; } // a second pass this frame keeps it
+        _gunLastPos = _gun.position; _gunLastRot = _gun.rotation; _gunLastFrame = frame;
     }
 
     // Re-assert the grip after everything else has moved this frame.
@@ -1446,50 +1496,100 @@ internal partial class NmBody : MonoBehaviour
     private void RestoreGun()
     {
         if (_gunRoutine != null) { StopCoroutine(_gunRoutine); _gunRoutine = null; } // a drop still moving it
-        if (_gun != null && _gunParent != null)
+        GunCollidersRestore(); // first: a dead man's gun then gets EFT's own (GunToCorpse)
+        if (_gun != null && _gunParent != null && _gunBody == null) // let go into its body while he died: it's home, falling on its own
         {
-            // a dead man's gun: EFT gave the weapon prefab its own rigidbody at death (strapped to the
-            // corpse), and the prefab sits above the weapon root. Snapped home alone, the gun jumped from the
-            // doll's hand to wherever that body had been dragged and seemed to vanish; the body is moved so
-            // the gun lands home exactly where he dropped it, then left to EFT's physics.
-            // (the gun itself hangs loose in his hand during the reaction: its home is what sits under the body)
             bool dead = _p != null && _p.HealthController?.IsAlive != true;
-            var rag = dead ? _p.GetComponentInChildren<EFT.Interactive.Corpse>(true)?.Ragdoll : null;
-            Rigidbody drop = rag?._weaponRigidbody;
-            string why = !dead ? null : rag == null ? "no corpse ragdoll" : drop == null ? "ragdoll has no weapon body"
-                : !_gunParent.IsChildOf(drop.transform) ? $"weapon body {TreePath(drop.transform)} is not above the gun's home {TreePath(_gunParent)}" : null;
-            if (why != null) drop = null;
-            Vector3 seenPos = _gun.position;
-            Quaternion seenRot = _gun.rotation;
-            _gun.SetParent(_gunParent, false);
-            _gun.localPosition = _gunLocal.pos;
-            _gun.localRotation = _gunLocal.rot;
-            _gun.localScale = _gunLocal.scale;
-            if (drop != null)
+            string why = null;
+            if (!dead || !GunToCorpse(out why))
             {
-                Transform body = drop.transform;
-                Quaternion relRot = Quaternion.Inverse(body.rotation) * _gun.rotation;
-                Vector3 relPos = Quaternion.Inverse(body.rotation) * (_gun.position - body.position);
-                Quaternion rot = seenRot * Quaternion.Inverse(relRot);
-                Vector3 pos = seenPos - rot * relPos;
-                body.SetPositionAndRotation(pos, rot);
-                drop.position = pos; drop.rotation = rot;
-                drop.isKinematic = false;
-                drop.velocity = Vector3.zero;
-                drop.angularVelocity = Vector3.zero;
-                drop.WakeUp();
-                EuphoriaPlugin.Log($"Delirium: dead man's gun dropped where he held it ({body.name}) - left to its physics");
+                GunHome();
+                if (dead) EuphoriaPlugin.Log($"Delirium: dead man's gun - {why}; snapped home");
             }
-            else if (why != null)
-                EuphoriaPlugin.Log($"Delirium: dead man's gun - {why}; snapped home");
         }
-        GunCollidersRestore();
         GlueEnd();
         _gun = null;
+        _gunBody = null;
         _gunDropped = false;
         _gunHeldInit = false;
         _gunLocked = false;
     }
+
+    private void GunHome()
+    {
+        _gun.SetParent(_gunParent, false);
+        _gun.localPosition = _gunLocal.pos;
+        _gun.localRotation = _gunLocal.rot;
+        _gun.localScale = _gunLocal.scale;
+    }
+
+    // A dead man's gun: EFT gave the weapon prefab its own rigidbody at death, and the prefab sits above
+    // the weapon root. Snapped home alone, the gun jumped from the doll's hand to wherever that body had
+    // been dragged and seemed to vanish; the body is moved so the gun lands home exactly where it is now,
+    // then left to its physics, nothing of his holding it: EFT ties that body to the corpse (a spring
+    // strap to his chest, or fixed to the hand), and the tie is cut, or the gun swung and flopped about on
+    // it as the body moved; it hangs in his rig's bones (the weapon root, moved by the animation and the
+    // doll), and is taken out to his root, which stays put while he dies, so it still goes with the corpse;
+    // it doesn't collide with his own body, which follows the doll while he dies and batted it away. It
+    // leaves the hand moving as the hand moved it, and EFT makes that body a frame after he dies, so a gun
+    // let go before then waits for it (UpdateDying).
+    private Rigidbody _gunBody; // the weapon body let go while he dies: not held with the corpse
+    private float _nextGunTry;
+    private bool GunToCorpse(out string why)
+    {
+        bool dead = _p != null && _p.HealthController?.IsAlive != true;
+        var rag = dead ? _p.GetComponentInChildren<EFT.Interactive.Corpse>(true)?.Ragdoll : null;
+        Rigidbody drop = rag?._weaponRigidbody;
+        why = !dead ? "alive" : rag == null ? "no corpse ragdoll" : drop == null ? "ragdoll has no weapon body"
+            : !_gunParent.IsChildOf(drop.transform) ? $"weapon body {TreePath(drop.transform)} is not above the gun's home {TreePath(_gunParent)}" : null;
+        if (why != null) return false;
+        if (_gunRoutine != null) { StopCoroutine(_gunRoutine); _gunRoutine = null; }
+        Vector3 seenPos = _gun.position;
+        Quaternion seenRot = _gun.rotation;
+        GunHome();
+        Transform body = drop.transform;
+        Quaternion relRot = Quaternion.Inverse(body.rotation) * _gun.rotation;
+        Vector3 relPos = Quaternion.Inverse(body.rotation) * (_gun.position - body.position);
+        Quaternion rot = seenRot * Quaternion.Inverse(relRot);
+        Vector3 pos = seenPos - rot * relPos;
+        bool tied = rag._weaponJoint != null;
+        if (tied) { UnityEngine.Object.Destroy(rag._weaponJoint); rag._weaponJoint = null; }
+        string was = body.parent != null ? body.parent.name : "none";
+        body.SetParent(_p.gameObject.transform, true);
+        body.SetPositionAndRotation(pos, rot);
+        int solid = GunCollidersDead(body);
+        Collider[] own = _p.GetComponentsInChildren<Collider>(false);
+        foreach (Collider g in body.GetComponentsInChildren<Collider>(false))
+            foreach (Collider c in own)
+                if (!c.transform.IsChildOf(body)) Physics.IgnoreCollision(g, c);
+        _corpse.Remove(drop);
+        _gunBody = drop;
+        bool moving = _gunLastFrame >= Time.frameCount - 3; // its motion in the hand is fresh
+        drop.position = pos; drop.rotation = rot;
+        drop.isKinematic = false;
+        drop.velocity = moving ? Vector3.ClampMagnitude(_gunVel, GunLetGoMaxSpeed) : Vector3.zero;
+        drop.angularVelocity = moving ? Vector3.ClampMagnitude(_gunSpin, GunLetGoMaxSpin) : Vector3.zero;
+        drop.WakeUp();
+        EuphoriaPlugin.Log($"Delirium: dead man's gun let go where he held it ({body.name}, out of {was}{(tied ? ", cut from the corpse" : "")}, " +
+                           $"{solid} solid collider(s), {drop.velocity.magnitude:F1} m/s) - left to its physics");
+        return true;
+    }
+
+    // The colliders EFT gave the dead man's gun for the floor (Player.DropItemDead: its pool object's solid
+    // ones, on, on the Deadbody layer). The ones we switched off while he held it had been put back as they
+    // were in his hands, off, after EFT turned them on: the gun fell through the ground.
+    private int GunCollidersDead(Transform body)
+    {
+        _gunColliders.Clear(); // EFT's now: never put back to the hands' state
+        int deadLayer = LayerMask.NameToLayer("Deadbody"), n = 0;
+        foreach (EFT.AssetsManager.AssetPoolObject apo in body.GetComponentsInChildren<EFT.AssetsManager.AssetPoolObject>(true))
+            foreach (Collider c in apo.Colliders)
+                if (c != null && !c.isTrigger && c.gameObject.layer == deadLayer) { c.enabled = true; n++; }
+        return n;
+    }
+
+    private const float GunLetGoMaxSpeed = 6f; // m/s
+    private const float GunLetGoMaxSpin = 12f; // rad/s
 
     // The hand-back: the gun goes home to the weapon root, but over the same blend the arms take, from
     // his hand to where the game's weapon animation has it. Snapped home at once, it sat at the animated
@@ -1545,14 +1645,18 @@ internal partial class NmBody : MonoBehaviour
         _gunRoutine = StartCoroutine(DropGunRoutine(_gun));
     }
 
-    /// Dying: the gun slips out of his hand as he goes down (whatever "Heavy hits drop the weapon"
-    /// says) and falls to the real ground under it. Still his item: only its model leaves the hand.
+    /// Dying: the gun leaves his hand (whatever "Heavy hits drop the weapon" says) as the agony starts,
+    /// or as a death fall collapses him, and falls under EFT's own physics for it; not later, when SPT's
+    /// ragdoll takes the body. Still his item: only its model leaves the hand.
     private void DropOnDeath()
     {
         if (_gun == null) GunToHand();
         if (_gun == null || _gunDropped) return;
         _gunDropped = true;
         GunCollidersRestore(); // a dropped gun is a world object again
+        if (GunToCorpse(out string why)) return;
+        EuphoriaPlugin.LogV($"Delirium: dying gun falls on its own until it can go into its body ({why})");
+        _nextGunTry = 0f;
         _gun.SetParent(null, true);
         _gunRoutine = StartCoroutine(SettleGunRoutine(_gun));
         EuphoriaPlugin.LogV("Delirium: the gun slips from his hand as he goes down");
@@ -1615,7 +1719,7 @@ internal partial class NmBody : MonoBehaviour
     {
         get
         {
-            for (int i = 0; i < AllBodies.Count; i++) if (AllBodies[i] != null && AllBodies[i].Busy) return true;
+            for (int i = 0; i < AllBodies.Count; i++) if (AllBodies[i].Busy && AllBodies[i] != null) return true; // Busy first: plain fields
             return false;
         }
     }
@@ -1627,7 +1731,7 @@ internal partial class NmBody : MonoBehaviour
     internal static bool IsBusy(Player p)
     {
         for (int i = 0; i < AllBodies.Count; i++)
-            if (AllBodies[i] != null && AllBodies[i]._p == p && AllBodies[i].Busy) return true;
+            if (AllBodies[i].Busy && AllBodies[i] != null && AllBodies[i]._p == p) return true;
         return false;
     }
 
@@ -1638,7 +1742,7 @@ internal partial class NmBody : MonoBehaviour
         for (int i = 0; i < AllBodies.Count; i++)
         {
             NmBody b = AllBodies[i];
-            if (b != null && b._p == p && b.Busy) return !b._aimBack;
+            if (b.Busy && b != null && b._p == p) return !b._aimBack;
         }
         return false;
     }
@@ -1649,7 +1753,7 @@ internal partial class NmBody : MonoBehaviour
         for (int i = 0; i < AllBodies.Count; i++)
         {
             NmBody b = AllBodies[i];
-            if (b != null && b._p == p && b.Busy) return b.AimShotAllowed();
+            if (b.Busy && b != null && b._p == p) return b.AimShotAllowed();
         }
         return true;
     }
@@ -1687,7 +1791,7 @@ internal partial class NmBody : MonoBehaviour
         for (int i = 0; i < AllBodies.Count; i++)
         {
             NmBody b = AllBodies[i];
-            if (b != null && b._p == p && b.Busy) return Time.time < b._grantUntil;
+            if (b.Busy && b != null && b._p == p) return Time.time < b._grantUntil;
         }
         return true;
     }
@@ -1742,7 +1846,7 @@ internal partial class NmBody : MonoBehaviour
             PerfReport();
         }
         if (_aimBack) StopAim();
-        if (_dying || !alive) ReleaseCorpse();
+        if (_dying || (!alive && !AmosBridge.OwnsDeaths)) ReleaseCorpse(); // its death motion has the corpse: hands off (no weights either)
         if (_p != null && _speedLimitApplied && !_holdOver)
         {
             try { _p.RemoveStateSpeedLimit(Player.ESpeedLimit.Shot); } catch { }
@@ -1805,7 +1909,11 @@ internal partial class NmBody : MonoBehaviour
         bool alive = _p.HealthController?.IsAlive == true;
         // Died some other way mid-reaction (bleed-out, a hit we didn't see):
         // go straight into the death struggle.
-        if (!alive && !_dying) BeginDying();
+        if (!alive && !_dying)
+        {
+            if (AmosBridge.OwnsDeaths) { Release(); return; } // Euphoria Style Physics' muscles have his corpse
+            BeginDying();
+        }
 
         if (_gun == null && Time.time >= _nextGun) { _nextGun = Time.time + 0.4f; GunToHand(); }
         if (Time.time >= _nextCancel) { BotActions.Cancel(_p); _nextCancel = Time.time + 0.5f; }
@@ -1813,6 +1921,9 @@ internal partial class NmBody : MonoBehaviour
         // below 20 fps the doll runs a little slow instead
         _acc = Mathf.Min(_acc + Time.deltaTime, Step * 3f);
         if (_acc >= Step) { ImpactBefore(); BubbleTick(); PhysGetUpTarget(); }
+        // the steps and everything after them run with the other reacting bots' at the end of Update,
+        // the dolls side by side (NmBodySteps)
+        if (_acc >= Step && DeferSteps()) return;
         bool stepped = false;
         while (_acc >= Step)
         {
@@ -1825,6 +1936,12 @@ internal partial class NmBody : MonoBehaviour
             SnapStep();      // the state the bones are interpolated from (NmBodyInterp)
             stepped = true;
         }
+        UpdateAfterSteps(stepped);
+    }
+
+    /// Update from the steps on: the doll's new state read, and every tick that follows from it.
+    private void UpdateAfterSteps(bool stepped)
+    {
         if (stepped) { ImpactAfter(); FloorNet(); }
 
         float vmax = 0f;
@@ -2049,6 +2166,7 @@ internal partial class NmBody : MonoBehaviour
 
         if (LockOn) LockToJoints(armsOn, lockWrist, armW); // bones aimed at the doll's joints, hands and feet IK'd onto it
         else ClampToJoints(armsOn, lockWrist); // SPT follows, held to the doll's joint ranges
+        LegUntwist(true); // shins without a roll on their thighs, feet on the doll's ankle (NmBodyLegTwist)
 
         // Gun-hand guard: where is the gun hand relative to the body? In front is right; level with
         // the chest or behind means the physics arm flung it back, so the animated hold takes over.
@@ -2081,6 +2199,7 @@ internal partial class NmBody : MonoBehaviour
         if (_matching || MatchFading) MatchVisual(); // recovering: SPT's bones settle into the stance he's handed back in (eased off when cancelled)
         if (_pgu) PhysGetUpShow(); // getting up: the clip mixed back in over the doll
         KneeGuard(); // whatever posed them: knees bend only the way a knee does (NmBodyKneeGuard)
+        LegUntwist(false); // the guard's turn leaves no roll either
         LegTwistTick(_pgu ? "physical get-up" : _matching ? "stance match" : _dying ? "dying" : "doll's pose"); // diagnostic (NmBodyLegTwist)
         HoldGun();
         if (_matching) ReachSupportGrip(); // recovering: the free hand finds its place on the gun again

@@ -1,0 +1,25 @@
+# build output
+bin/
+obj/
+build_log.txt
+# binaries and game data: never commit (GTA clips in getups.bin, EFT dumps, engine builds)
+*.dll
+*.bin
+metadump/
+*.json
+*.txt
+
+# editor backups
+*bak
+
+# our own physics body and the Tarkov measurements it's built from
+!body.json
+!character/*.json
+
+# our own balance presets
+!presets/*.txt
+
+# tune_balance.py's measurements of the reference and its scratch output: local only
+character/ref.json
+character/tuned_*
+character/tune_log.txt

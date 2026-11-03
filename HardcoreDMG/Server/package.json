@@ -1,0 +1,11 @@
+{
+    "name": "HardcoreDMG",
+    "author": "Devin",
+    "version": "1.0.0",
+    "license": "MIT",
+    "main": "HardcoreDMG.dll",
+    "sptVersion": "~4.1.6",
+    "contributors": [],
+    "url": "",
+    "incompatibilities": []
+}

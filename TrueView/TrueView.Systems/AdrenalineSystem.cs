@@ -8,25 +8,33 @@ using UnityEngine;
 namespace TrueView.Systems;
 
 /// <summary>
-/// Adrenaline dump. Being shot at (hits taken or nearby enemy gunfire)
-/// raises an adrenaline level that decays
-/// over several seconds. While elevated it feeds three things: a slight
-/// hands tremor (read by SwaySystem), a tunnel-vision FOV pinch (read by
-/// DynamicFovSystem), and a synthesized low-frequency heartbeat whose rate
-/// and volume scale with the level. No audio assets needed — the lub-dub
-/// clip is generated procedurally at first use.
+/// Adrenaline dump. Being shot at (nearby enemy gunfire, rounds passing
+/// close) raises an adrenaline level that decays over several seconds; a hit
+/// taken spikes it to full and starts a separate hit level. While elevated
+/// it feeds a slight hands tremor (read by SwaySystem), a tunnel-vision FOV
+/// pinch (read by DynamicFovSystem), and a synthesized low-frequency
+/// heartbeat. No audio assets needed — the lub-dub clip is generated
+/// procedurally at first use.
+///
+/// Shot at: a soft, slow heartbeat (BreathingSystem plays quiet nose
+/// breathing). Hit: a loud, fast heartbeat with heavy breathing, easing
+/// through the calm-down into slower, softer beats until it stops.
 /// </summary>
 internal static class AdrenalineSystem
 {
     private const float HeartSampleRate = 22050f;
 
     private static float _level;
+    private static float _hit;
     private static float _nextBeat;
     private static AudioClip _heartClip;
     private static AudioSource _heartSource;
 
     /// <summary>0..1 — how wound up the player currently is.</summary>
     public static float Level => _level;
+
+    /// <summary>0..1 — the part of it that comes from being hit (1 on a hit, drains like the level).</summary>
+    public static float HitLevel => _hit;
 
     /// <summary>FOV multiplier contribution (tunnel vision under adrenaline).</summary>
     public static float FovFactor =>
@@ -75,7 +83,12 @@ internal static class AdrenalineSystem
     public static void OnHit()
     {
         if (HandlingConfig.AdrenalineEnabled?.Value == true)
+        {
+            if (_hit < 0.5f)
+                Log.Info($"Adrenaline: hit taken, spiked to full (was {_level:0.00})");
             _level = 1f;
+            _hit = 1f;
+        }
     }
 
     public static void Tick(Player player, float dt)
@@ -89,13 +102,18 @@ internal static class AdrenalineSystem
         float decay = Mathf.Max(1f, HandlingConfig.AdrenalineDecay?.Value ?? 8f);
         _level = Mathf.Max(0f, _level - dt / decay);
         if (_level < 0.005f) _level = 0f;
+        _hit = Mathf.Min(_level, Mathf.Max(0f, _hit - dt / decay));
 
         UpdateHeartbeat(dt);
     }
 
     private static void UpdateHeartbeat(float dt)
     {
-        float volume = (HandlingConfig.AdrenalineHeartbeat?.Value ?? 0f) * _level;
+        // Shot at: soft. Hit: full. After a hit the calm-down nose breathing
+        // keeps a faint beat going that fades out with it.
+        float tail = BreathingSystem.CalmTail;
+        float strength = Mathf.Max(Mathf.Max(_level * 0.45f, _hit), tail * 0.3f);
+        float volume = (HandlingConfig.AdrenalineHeartbeat?.Value ?? 0f) * strength;
         if (volume < 0.02f)
         {
             if (_heartSource != null && _heartSource.isPlaying)
@@ -108,9 +126,9 @@ internal static class AdrenalineSystem
         {
             Camera cam = Camera.main;
             if (cam == null) return;
-            _heartSource = cam.GetComponent<AudioSource>();
-            if (_heartSource == null)
-                _heartSource = cam.gameObject.AddComponent<AudioSource>();
+            // Always our own source: its pitch changes per beat, which must
+            // never touch a source the game put on the camera.
+            _heartSource = cam.gameObject.AddComponent<AudioSource>();
             BreathingSystem.RouteToGameMixer(_heartSource);
             _heartSource.spatialBlend = 0f;
             _heartSource.loop = false;
@@ -125,46 +143,80 @@ internal static class AdrenalineSystem
         if (_nextBeat <= 0f && !_heartSource.isPlaying)
         {
             _heartSource.clip = _heartClip;
-            // A heavy exhale covers the heart a little.
-            _heartSource.volume = Mathf.Clamp01(volume * BreathingSystem.HeartMask);
+            // A heavy exhale covers the heart a little. A harder-pumping
+            // heart lands a touch higher; no two beats quite alike.
+            _heartSource.volume = Mathf.Clamp01(volume * 1.6f * BreathingSystem.HeartMask * UnityEngine.Random.Range(0.9f, 1f));
+            _heartSource.pitch = Mathf.Lerp(0.95f, 1.05f, strength) * UnityEngine.Random.Range(0.98f, 1.02f);
             _heartSource.Play();
-            // ~70bpm at full calm up to ~140bpm at peak adrenaline, a touch
-            // quicker on each inhale (as a real heart does).
-            float bpm = Mathf.Lerp(70f, 140f, _level) * BreathingSystem.HeartRateMod;
+            // Shot at: up to ~95 bpm. Hit: up to ~140 bpm. The calm-down
+            // slows it toward ~58 bpm as it fades. A touch quicker on each
+            // inhale (as a real heart does).
+            float bpm = Mathf.Max(Mathf.Max(Mathf.Lerp(60f, 95f, _level), Mathf.Lerp(60f, 140f, _hit)),
+                Mathf.Lerp(58f, 72f, tail)) * BreathingSystem.HeartRateMod;
             _nextBeat = 60f / bpm;
         }
     }
 
     /// <summary>
-    /// Synthesizes a single "lub-dub": two low-frequency decaying sine
-    /// bursts ~150ms apart, with a soft exponential envelope.
+    /// Synthesizes a single "lub-dub" heard from inside the chest: each sound
+    /// is a low thump whose pitch drops as it lands, a soft muffled knock on
+    /// top, and a deep body rumble under it. A gentle saturation adds the
+    /// overtones that let headphones and small speakers carry a ~50 Hz beat,
+    /// and a low-pass takes the edge off, so it reads as felt rather than heard.
     /// </summary>
     private static AudioClip BuildHeartbeatClip()
     {
-        int len = (int)(HeartSampleRate * 0.55f);
+        int len = (int)(HeartSampleRate * 0.75f);
         var samples = new float[len];
-        Thump(samples, 0.00f, 55f, 0.14f, 1f);    // lub
-        Thump(samples, 0.16f, 48f, 0.12f, 0.75f); // dub
+        var rng = new System.Random(7);
+        Thump(samples, rng, 0.00f, 72f, 40f, 0.20f, 0.055f, 1f);    // lub: deeper, longer
+        Thump(samples, rng, 0.17f, 88f, 52f, 0.14f, 0.035f, 0.72f); // dub: shorter, a touch higher
+
+        // Saturate, low-pass at ~350 Hz (the chest wall), then normalize.
+        float rc = 1f / (2f * Mathf.PI * 350f);
+        float alpha = (1f / HeartSampleRate) / (rc + 1f / HeartSampleRate);
+        float lp = 0f, peak = 1e-6f;
+        for (int i = 0; i < len; i++)
+        {
+            float x = (float)Math.Tanh(samples[i] * 1.8f);
+            lp += alpha * (x - lp);
+            samples[i] = lp;
+            peak = Mathf.Max(peak, Mathf.Abs(lp));
+        }
+        for (int i = 0; i < len; i++)
+            samples[i] *= 0.95f / peak;
+
         var clip = AudioClip.Create("adrenaline_heartbeat", len, 1, (int)HeartSampleRate, false);
         clip.SetData(samples, 0);
         return clip;
     }
 
-    private static void Thump(float[] samples, float startSec, float freq, float duration, float amp)
+    private static void Thump(float[] samples, System.Random rng, float startSec, float freqStart, float freqEnd,
+        float duration, float decay, float amp)
     {
         int start = (int)(startSec * HeartSampleRate);
         int count = (int)(duration * HeartSampleRate);
+        float phase = 0f, noise = 0f;
         for (int i = 0; i < count && start + i < samples.Length; i++)
         {
             float t = i / HeartSampleRate;
-            float env = Mathf.Pow(1f - t / duration, 2f);
-            samples[start + i] += Mathf.Sin(2f * Mathf.PI * freq * t) * env * amp;
+            float freq = Mathf.Lerp(freqStart, freqEnd, Mathf.Sqrt(t / duration));
+            phase += 2f * Mathf.PI * freq / HeartSampleRate;
+            // 4 ms attack, then an exponential fall; tapered to zero at the end.
+            float env = Mathf.Min(1f, t / 0.004f) * Mathf.Exp(-t / decay) * (1f - t / duration);
+            float body = Mathf.Sin(phase) + 0.35f * Mathf.Sin(2f * phase);
+            // Muffled knock: smoothed noise for the first few milliseconds.
+            noise += 0.08f * ((float)rng.NextDouble() * 2f - 1f - noise);
+            float knock = noise * 3f * Mathf.Exp(-t / 0.006f);
+            float rumble = 0.5f * Mathf.Sin(2f * Mathf.PI * 32f * t) * Mathf.Exp(-t / 0.12f);
+            samples[start + i] += (body * env + knock + rumble * (1f - t / duration)) * amp;
         }
     }
 
     public static void Reset()
     {
         _level = 0f;
+        _hit = 0f;
         _nextBeat = 0f;
         if (_heartSource != null && _heartSource.isPlaying)
             _heartSource.Stop();

@@ -12,7 +12,7 @@ namespace TrueView.Systems;
 /// start following. A larger cone = more arm movement before the camera moves.
 /// Sprinting smoothly blends the effect out and back in for natural transitions.
 ///
-/// Natural motion layers (controlled by HipNaturalMotion):
+/// Natural motion layers:
 ///  - Organic Perlin drift: subtle micro-tremors simulating hands holding a gun
 ///  - Mouse whip: weapon lags behind fast mouse flicks then springs back
 ///  - Directional tilt: weapon rolls/tilts in the direction of mouse motion
@@ -91,6 +91,15 @@ internal static class ProceduralHipSystem
     // settles back into the normal ADS pose.
     private static float _adsLift;
     private static float _adsFloatTime;
+    // The ADS float follows the aim sway slider: its default keeps the float as
+    // designed, 0 stops it, higher values scale it up with the game's own sway.
+    private static float AimSwayScale()
+    {
+        var sway = HandlingConfig.AimSwayMultiplier;
+        if (sway == null) return 1f;
+        float def = (float)sway.DefaultValue;
+        return def > 0f ? Mathf.Min(sway.Value / def, 3f) : 1f;
+    }
     private static Vector2 _adsFloat;
 
     // --- Lazy weapon physics (spring-mass-damper follow) ---
@@ -523,7 +532,7 @@ internal static class ProceduralHipSystem
         if (_cameraSettlePending && !ShotSystem.InShotRecovery)
         {
             _cameraSettlePending = false;
-            _cameraSettleActive = centering < 1f && HandlingConfig.CameraSettleAfterFiring?.Value == true;
+            _cameraSettleActive = centering < 1f && (HandlingConfig.CameraSettleAmount?.Value ?? 0.5f) > 0.001f;
             _cameraSettleEnd = Time.unscaledTime + CameraSettleDuration;
             _cameraSettleLast = float.MaxValue;
             _cameraSettleTurned = 0f;
@@ -546,6 +555,7 @@ internal static class ProceduralHipSystem
 
         float automaticAdsFloat = isAiming && !HandlingState.IsHoldingBreath
             ? (1f - adsTightness) * (0.06f + stats.WeightProgress * 0.14f + fatigue * 0.38f + movement * 0.28f)
+                * AimSwayScale()
             : 0f;
         if (automaticAdsFloat > 0.001f)
         {
@@ -642,12 +652,11 @@ internal static class ProceduralHipSystem
         Vector3 posOffset = Vector3.zero;
 
         bool applyHipMotion = !HandlingState.IsAiming;
-        float naturalStrength = HandlingConfig.HipNaturalMotion.Value;
-        if (applyHipMotion && naturalStrength > 0.001f)
+        if (applyHipMotion)
         {
-            Vector2 drift = _organicOffset * naturalStrength;
-            Vector2 whip = _whipOffset * naturalStrength;
-            float tilt = _tiltCurrent * naturalStrength;
+            Vector2 drift = _organicOffset;
+            Vector2 whip = _whipOffset;
+            float tilt = _tiltCurrent;
 
             Vector3 naturalEuler = new Vector3(
                 drift.y + whip.y,
@@ -657,7 +666,7 @@ internal static class ProceduralHipSystem
             baseOffset = Quaternion.Euler(naturalEuler) * baseOffset;
         }
 
-        // Procedural arm/wrist motion layers (independent of HipNaturalMotion)
+        // Procedural arm/wrist motion layers
         Vector3 armEuler = Vector3.zero;
         // Acceleration sway: pitch from starting/stopping
         armEuler.x += _accelPitch;
@@ -701,8 +710,8 @@ internal static class ProceduralHipSystem
         }
 
         float leadStrength = applyHipMotion
-            ? HandlingConfig.HipBodyTurnLead.Value
-            : HandlingConfig.AdsWeaponLead?.Value ?? 0f;
+            ? HandlingConfig.HipLeadStrength
+            : HandlingConfig.AdsLeadStrength;
         if (leadStrength > 0.001f)
         {
             Quaternion leadRot = Quaternion.Euler(0f, leadYawUse, _leadRoll);
@@ -766,6 +775,22 @@ internal static class ProceduralHipSystem
             posOffset += TurnRollSystem.ArcPos;
             baseOffset = TurnRollSystem.ArcRot * baseOffset;
         }
+
+        // Through a magnified scope the game moves its scope shadow whenever
+        // the gun points off the eye line, so any deadzone lag, lead, cant or
+        // float reads as the lens coming loose. The gun stays on the camera
+        // there and only the game's own sway moves it.
+        float scopeKeep = HandlingState.IsAiming ? 1f - ScopeOpticsSystem.Magnified : 1f;
+        if (scopeKeep < 0.999f)
+        {
+            baseOffset = Quaternion.Slerp(Quaternion.identity, baseOffset, scopeKeep);
+            posOffset *= scopeKeep;
+        }
+        // Scoped rifle at the hip: carried a little lower so the scope bell
+        // clears the middle of the screen. Position only, the aim is unchanged.
+        float hipDrop = (HandlingConfig.ScopedHipDrop?.Value ?? 0f) * 0.01f * ScopeOpticsSystem.ScopedHip;
+        if (hipDrop > 0f)
+            posOffset.y -= hipDrop;
 
         float blend = 1f - _sprintBlend;
         _cachedWeaponOffset = Quaternion.Slerp(Quaternion.identity, baseOffset, blend);
@@ -903,9 +928,9 @@ internal static class ProceduralHipSystem
         UpdateAdsCant(dt, aiming);
 
         float strength = aiming
-            ? HandlingConfig.AdsWeaponLead?.Value ?? 0f
-            : HandlingConfig.HipBodyTurnLead.Value;
-        float bendAvailable = HandlingConfig.HipTurnBend?.Value ?? 0f;
+            ? HandlingConfig.AdsLeadStrength
+            : HandlingConfig.HipLeadStrength;
+        float bendAvailable = aiming ? HandlingConfig.AdsBendFraction : HandlingConfig.HipBendStrength;
         if (strength <= 0.001f && bendAvailable <= 0.001f)
         {
             _leadYaw = 0f;
@@ -984,20 +1009,20 @@ internal static class ProceduralHipSystem
     /// </summary>
     private static void UpdateMuzzleLead(float dt, WeaponStats stats, float sprintFade)
     {
-        float strength = HandlingConfig.HipTurnBend?.Value ?? 0f;
-        if (strength <= 0.001f)
+        // Aiming bends a fraction of the default hip bend, so the hip slider leaves ADS alone.
+        bool aiming = HandlingState.IsAiming;
+        float strength = aiming ? HandlingConfig.DefaultHipBend : HandlingConfig.HipBendStrength;
+        if (strength <= 0.001f || (aiming && HandlingConfig.AdsBendFraction <= 0.001f))
         {
             _bendYaw = 0f;
             _bendYawVel = 0f;
             _bendPrevRate = 0f;
             return;
         }
-        bool aiming = HandlingState.IsAiming;
-
         float rate = MotionTracker.YawRate;                        // deg/s, + = turning right
         float amp = 18f * Mathf.Pow(strength, 0.85f);               // deg at full-speed turns
         amp *= sprintFade * Mathf.Lerp(1f, 1.5f, stats.WeightProgress);
-        if (aiming) amp *= HandlingConfig.AdsTurnBend?.Value ?? 0.6f;
+        if (aiming) amp *= HandlingConfig.AdsBendFraction;
         float target = Mathf.Clamp((float)System.Math.Tanh(rate / 160f) * amp, -55f, 55f);
 
         // flick impulse: change in turn speed throws the muzzle ahead
@@ -1023,17 +1048,6 @@ internal static class ProceduralHipSystem
     /// </summary>
     private static void UpdateNaturalMotion(float dt, float sprintBlend)
     {
-        float naturalStrength = HandlingConfig.HipNaturalMotion.Value;
-        if (naturalStrength <= 0.001f)
-        {
-            _organicOffset = Vector2.zero;
-            _whipOffset = Vector2.zero;
-            _whipVelocity = Vector2.zero;
-            _tiltCurrent = 0f;
-            _tiltVelocity = 0f;
-            return;
-        }
-
         float sprintFade = 1f - _sprintBlend * 0.85f;
 
         // --- Organic Perlin drift ---

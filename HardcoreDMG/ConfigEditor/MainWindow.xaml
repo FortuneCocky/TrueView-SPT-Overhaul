@@ -1,0 +1,251 @@
+<Window x:Class="HardcoreDMGUI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="HardcoreDMG Config Editor"
+        Height="820" Width="660"
+        MinHeight="600" MinWidth="560"
+        Background="#181825"
+        WindowStartupLocation="CenterScreen"
+        Loaded="Window_Loaded">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" Background="#2A2A3C" Padding="16,10,16,10">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="HardcoreDMG" FontSize="20" FontWeight="Bold" Foreground="#7AA7D9" VerticalAlignment="Center"/>
+                <TextBlock Text="  Config Editor" FontSize="14" Foreground="#888" VerticalAlignment="Center" Margin="0,2,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <TabControl Grid.Row="1" Margin="12,8,12,0">
+
+            <!-- ==================== Health (server) ==================== -->
+            <TabItem Header="Health">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4,4,4,4">
+                    <StackPanel>
+                        <GroupBox Header="HardcoreDMG" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <CheckBox x:Name="ModEnabled" Content="HardcoreDMG enabled"/>
+                                <TextBlock Text="This tab is the server config (bot and player HP). The other tabs are the client config, which you can also change in game with F12."
+                                           Style="{StaticResource Hint}" Margin="0,4,0,0"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Body model" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <TextBlock Text="Ticked groups get HardcoreDMG's body (head 22, chest 115, stomach 105, arms 58, legs 68), with their own builds for named bosses. Unticked groups keep vanilla HP."
+                                           Style="{StaticResource Hint}"/>
+                                <UniformGrid Columns="2">
+                                    <CheckBox x:Name="BodyRegulars" Content="Regulars (scavs, PMCs, snipers)"/>
+                                    <CheckBox x:Name="BodyGuards" Content="Boss guards"/>
+                                    <CheckBox x:Name="BodyRaiders" Content="Raiders and rogues"/>
+                                    <CheckBox x:Name="BodyCultists" Content="Cultist warriors"/>
+                                    <CheckBox x:Name="BodyBosses" Content="Bosses, Goons, priest"/>
+                                    <CheckBox x:Name="BodyInfected" Content="Infected (tanky torso)"/>
+                                </UniformGrid>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Toughness" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <TextBlock Text="Scales HP per tier after the body model. 1.00 = unchanged." Style="{StaticResource Hint}"/>
+                                <StackPanel x:Name="ToughnessRows"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Player" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <TextBlock Text="Scales your max HP on every body part. 1.00 = unchanged." Style="{StaticResource Hint}"/>
+                                <StackPanel x:Name="PlayerRows"/>
+                            </StackPanel>
+                        </GroupBox>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ==================== Damage (client) ==================== -->
+            <TabItem Header="Damage">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4,4,4,4">
+                    <StackPanel>
+                        <GroupBox Header="Damage model (client)" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <CheckBox x:Name="DamageModelOn" Content="Damage model active"/>
+                                <CheckBox x:Name="TorsoZonesOn" Content="Anatomical torso zones (heart, spine, flanks, pelvis)"/>
+                                <TextBlock Text="Scales hits on the player and bots. 1.00 = unchanged." Style="{StaticResource Hint}" Margin="0,4,0,2"/>
+                                <StackPanel x:Name="DamageRows"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Bullet physics (client)" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <CheckBox x:Name="BulletPhysics" Content="Bullet physics active"/>
+                                <TextBlock Text="Speed-based damage, fragmentation, armor penetration and ricochets."
+                                           Style="{StaticResource Hint}" Margin="0,4,0,2"/>
+                                <StackPanel x:Name="BulletRows"/>
+                            </StackPanel>
+                        </GroupBox>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ==================== Wounds (client) ==================== -->
+            <TabItem Header="Wounds">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4,4,4,4">
+                    <StackPanel>
+                        <GroupBox Header="Wound reactions (client)" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <CheckBox x:Name="WeaponDropOn" Content="Weapon drop on arm wounds (player)"/>
+                                <CheckBox x:Name="WoundFallOn" Content="Fall on leg wounds"/>
+                                <TextBlock Text="Base odds in percent. Bigger wounds raise them." Style="{StaticResource Hint}" Margin="0,4,0,2"/>
+                                <StackPanel x:Name="ReactionRows"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Stance lock (client)" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <CheckBox x:Name="ProneLockOn" Content="Prone lock"/>
+                                <CheckBox x:Name="CrouchLockOn" Content="Crouch lock"/>
+                                <TextBlock Text="Leg HP percent below which you can't stand up from prone or crouch." Style="{StaticResource Hint}" Margin="0,4,0,2"/>
+                                <StackPanel x:Name="StanceRows"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Leg cripple (client)" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <CheckBox x:Name="LegCrippleOn" Content="Leg cripple"/>
+                                <UniformGrid Columns="2">
+                                    <CheckBox x:Name="LegCripplePlayer" Content="Affects the player"/>
+                                    <CheckBox x:Name="LegCrippleBots" Content="Affects bots"/>
+                                </UniformGrid>
+                                <StackPanel x:Name="CrippleRows"/>
+                            </StackPanel>
+                        </GroupBox>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ==================== Shotguns (client) ==================== -->
+            <TabItem Header="Shotguns">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4,4,4,4">
+                    <StackPanel>
+                        <GroupBox Header="Shotgun rework (client)" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <CheckBox x:Name="ShotgunsOn" Content="Shotgun rework active"/>
+                                <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,0"
+                                           Text="Every pellet is its own hit, so a shell's damage is the sum of what each pellet brings. Each pellet's damage follows its kinetic energy at impact. The pattern hits hardest before it opens up, and every extra pellet from the same shell on the same target adds damage. Slugs keep their energy far better and hit armor hard. Needs the damage model active."/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Pellets and energy" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource Hint}"
+                                           Text="Energy model: 0 = the game's near-linear speed loss, 1 = damage follows kinetic energy (speed squared), so light pellets fade fast with range. Cluster bonus: the last pellet of a full hit gets the whole bonus, so a full hit averages half of it."/>
+                                <StackPanel x:Name="ShotgunPelletRows"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Spread and range (buckshot)" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource Hint}"
+                                           Text="Full point blank bonus up to the point blank range, fading to 1.00 at the effective range. Past it the pattern opens: damage x (effective / distance) ^ falloff, never below the minimum. Falloff 2 = pattern area (inverse square)."/>
+                                <StackPanel x:Name="ShotgunRangeRows"/>
+                                <TextBlock x:Name="ShotgunPreview" Foreground="#8FAACF" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Armor and slugs" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource Hint}"
+                                           Text="Blunt trauma scales hits that armor stopped. Slug damage scales slugs that get through."/>
+                                <StackPanel x:Name="ShotgunArmorRows"/>
+                            </StackPanel>
+                        </GroupBox>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ==================== Presets ==================== -->
+            <TabItem Header="Presets">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4,4,4,4">
+                    <StackPanel>
+                        <GroupBox Header="Presets" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource Hint}"
+                                           Text="A preset holds every HardcoreDMG setting on every tab: health, damage, wounds and shotguns. Loading one fills in the editor; click Save at the bottom to write it to the config files."/>
+                                <ListBox x:Name="PresetList" Height="170" SelectionChanged="PresetList_SelectionChanged"/>
+                                <TextBlock x:Name="PresetDescription" Foreground="#C0C0C0" FontSize="12" Margin="0,6,0,6" TextWrapping="Wrap"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Load" Click="ApplyPreset_Click" Margin="0,0,8,0"/>
+                                    <Button Content="Delete" Click="DeletePreset_Click" Margin="0,0,8,0"/>
+                                    <Button Content="Export to file..." Click="ExportPreset_Click" Margin="0,0,8,0"/>
+                                    <Button Content="Copy share code" Click="CopyShareCode_Click"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Save or rename a preset" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                            <TextBlock Style="{StaticResource Hint}"
+                                       Text="Save preset stores the editor's current settings under this name. To rename a saved preset, pick it in the list, change the name or description here and click Rename."/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="100"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Label Content="Name"/>
+                                <TextBox x:Name="PresetNameBox" Grid.Column="1" Style="{StaticResource WideBox}"/>
+                                <Label Grid.Row="1" Content="Description"/>
+                                <TextBox x:Name="PresetDescriptionBox" Grid.Row="1" Grid.Column="1" Style="{StaticResource WideBox}"/>
+                                <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,6,0,0">
+                                    <Button Content="Save preset" Click="SavePreset_Click" Margin="0,0,8,0"/>
+                                    <Button Content="Rename" Click="RenamePreset_Click"/>
+                                </StackPanel>
+                            </Grid>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Import a shared preset" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource Hint}"
+                                           Text="Paste a share code (starts with HDMG1:) or a preset's JSON, or open a preset file. Imported presets are added to the list above."/>
+                                <TextBox x:Name="ShareCodeBox" Style="{StaticResource WideBox}" Height="70"
+                                         TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"
+                                         VerticalContentAlignment="Top" FontSize="11"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                    <Button Content="Import code" Click="ImportCode_Click" Margin="0,0,8,0"/>
+                                    <Button Content="Import file..." Click="ImportFile_Click"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </GroupBox>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <!-- Footer -->
+        <Border Grid.Row="2" Background="#2A2A3C" Padding="16,8,16,10" Margin="0,8,0,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" x:Name="StatusText" Text="" Foreground="#888" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                <Button Grid.Column="1" Content="Browse..." Click="BrowseButton_Click" Margin="0,0,8,0"/>
+                <Button Grid.Column="2" Content="Save" Click="SaveButton_Click" Margin="0,0,8,0"/>
+                <Button Grid.Column="3" Content="Reset Defaults" Click="ResetButton_Click"/>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

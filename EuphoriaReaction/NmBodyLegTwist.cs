@@ -27,6 +27,7 @@ internal partial class NmBody
     private void LegTwistAttach()
     {
         for (int i = 0; i < _legTwistMax.Length; i++) _legTwistMax[i] = 0f;
+        for (int i = 0; i < _legHeld.Length; i++) _legHeld[i] = 0f;
         _legTwistWarned = 0;
     }
 
@@ -54,33 +55,64 @@ internal partial class NmBody
         }
     }
 
+    /// SPT's shins and feet on his own legs, after a pass has posed them. A knee is a hinge: the shin keeps
+    /// the roll it had on its thigh at the takeover. The aim and IK turned it the short way each time (rest ->
+    /// aim -> IK -> knee guard), and short turns that don't share a plane leave a roll behind: up to 117 deg
+    /// on dying bots (leg roll log). `feet`: each foot takes the doll's ankle (its foot against its shin) on
+    /// SPT's shin. Copied in world space, a foot took the doll's shin roll with it, which isn't SPT's (the aim
+    /// sets that): after a prone takeover, with the doll's hip clamped up to 108 deg off his, the feet turned
+    /// 120-170 deg about the shin.
+    /// Then a hip and an ankle turn only so far about the leg: the thigh's roll on the pelvis and the foot's on
+    /// the shin are held within HipRollMax / AnkleRollMax of the takeover, in SPT's own skeleton (as KneeGuard
+    /// holds the knees). A doll seeded far off his legs (a prone takeover mid-transition or mid-hand-back, the
+    /// outfit whose shin rest is snapped to the reference: knees 45-171 deg off their hinge at the takeover)
+    /// turns its own legs back into range, and that carried onto his thighs (up to 120 deg) and feet (178).
+    private const float HipRollMax = 50f, AnkleRollMax = 45f;
+    private readonly float[] _legHeld = new float[4]; // per reaction, the most each was held back: L hip, L ankle, R hip, R ankle
+
+    private void LegUntwist(bool feet)
+    {
+        for (int s = 0; s < 2; s++)
+        {
+            int th = s == 0 ? 1 : 4, ca = th + 1, ft = th + 2;
+            Transform pel = _bones[0], t = _bones[th], c = _bones[ca], f = _bones[ft];
+            if (pel == null || t == null || c == null || f == null) continue;
+            Vector3 thigh = c.position - t.position;
+            if (thigh.sqrMagnitude > 1e-6f)
+                RollWithin(t, pel.rotation * (Quaternion.Inverse(_boneRot0[0]) * _boneRot0[th]), thigh.normalized, HipRollMax, s * 2);
+            Vector3 shin = f.position - c.position;
+            if (shin.sqrMagnitude < 1e-6f) continue;
+            shin.Normalize();
+            Quaternion then = t.rotation * (Quaternion.Inverse(_boneRot0[th]) * _boneRot0[ca]);
+            float roll = TwistAbout(then, c.rotation, shin);
+            if (Mathf.Abs(roll) > 0.5f) c.rotation = Quaternion.AngleAxis(-roll, shin) * c.rotation;
+            if (feet)
+            {
+                // the doll's ankle, put through the takeover offsets: foot = shin * offset(shin) * ankle * offset(foot)^-1
+                Quaternion ankle = Quaternion.Inverse(PartRot(ca)) * PartRot(ft);
+                Quaternion offShin = Quaternion.Inverse(_boneRot0[ca]) * _partRot0[ca], offFoot = Quaternion.Inverse(_boneRot0[ft]) * _partRot0[ft];
+                f.rotation = c.rotation * offShin * ankle * Quaternion.Inverse(offFoot);
+            }
+            RollWithin(f, c.rotation * (Quaternion.Inverse(_boneRot0[ca]) * _boneRot0[ft]), shin, AnkleRollMax, s * 2 + 1);
+        }
+    }
+
+    /// Bone b's roll about `axis` (world, unit) from `then` (where it sat on its parent at the takeover) held to ±max.
+    private void RollWithin(Transform b, Quaternion then, Vector3 axis, float max, int held)
+    {
+        float roll = TwistAbout(then, b.rotation, axis);
+        float over = roll - Mathf.Clamp(roll, -max, max);
+        if (Mathf.Abs(over) < 0.01f) return;
+        b.rotation = Quaternion.AngleAxis(-over, axis) * b.rotation;
+        if (Mathf.Abs(over) > _legHeld[held]) _legHeld[held] = Mathf.Abs(over);
+    }
+
     private void LegTwistReport()
     {
         var sb = new StringBuilder();
         for (int i = 0; i < LegTwistBones.Length; i++)
             sb.Append(i == 0 ? "" : ", ").Append(LegTwistBones[i].name).Append(' ').Append(_legTwistMax[i].ToString("F0"));
-        EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} leg roll this reaction (max deg about itself vs the takeover): {sb}");
-    }
-
-    /// A leg bone's twist base from the outfit mesh, checked against his skeleton as it stood at the takeover
-    /// (`live`: its local rotation then). The aim pass keeps only this roll, and the leg rest the binding
-    /// corrects (FixLegRoll: some outfit meshes give a thigh or shin a rest rolled 135-174 deg) was never
-    /// corrected here: the shin rolled half a turn about itself and the foot on it pointed sideways or back.
-    /// A knee never rolls a shin on its thigh and a hip only turns so far, so a roll past StandingRollMax is the
-    /// mesh's: the base takes the skeleton's roll instead.
-    private Quaternion LegRestTwist(int bone, int child, Quaternion rest, Quaternion live)
-    {
-        Transform b = _bones[bone], c = _bones[child];
-        if (b == null || c == null) return rest;
-        Vector3 axis = Quaternion.Inverse(b.rotation) * (c.position - b.position); // its length, own frame
-        if (axis.sqrMagnitude < 1e-8f) return rest;
-        axis.Normalize();
-        Quaternion d = Quaternion.Inverse(rest) * live; // rest -> the skeleton, in its own frame
-        float roll = 2f * Mathf.Atan2(Vector3.Dot(new Vector3(d.x, d.y, d.z), axis), d.w) * Mathf.Rad2Deg;
-        if (roll > 180f) roll -= 360f;
-        if (roll < -180f) roll += 360f;
-        if (Mathf.Abs(roll) <= StandingRollMax) return rest;
-        EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} {b.name} twist base rolled {roll:F0} deg against his skeleton (outfit mesh) - corrected");
-        return rest * Quaternion.AngleAxis(roll, axis);
+        EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} leg roll this reaction (max deg about itself vs the takeover): {sb}"
+                           + $"; held back (most, deg): hips {_legHeld[0]:F0}/{_legHeld[2]:F0}, ankles {_legHeld[1]:F0}/{_legHeld[3]:F0}");
     }
 }

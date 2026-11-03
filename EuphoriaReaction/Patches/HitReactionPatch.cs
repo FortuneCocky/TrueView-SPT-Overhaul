@@ -49,9 +49,11 @@ public class HitReactionPatch : ModulePatch
         if (dead)
         {
             if (existing != null && existing.Dying) return; // already struggling
-            if (!entry.DeathEnabled.Value)
+            // Euphoria Style Physics plays his death: its muscles already took the corpse EFT made inside this hit
+            if (!entry.DeathEnabled.Value || AmosBridge.OwnsDeaths)
             {
                 if (existing != null && existing.Active) existing.Release();
+                if (AmosBridge.OwnsDeaths) AmosBridge.LogSkip(__instance, "death");
                 return;
             }
             try
@@ -73,9 +75,21 @@ public class HitReactionPatch : ModulePatch
             catch (System.Exception e) { EuphoriaPlugin.Log($"Delirium: death error: {e}"); }
             return;
         }
+        // Euphoria Style Physics' knockdown or stumble has him: he's its until it lets go
+        if (AmosBridge.HisBusy(__instance))
+        {
+            AmosBridge.LogSkip(__instance, "hit while in its knockdown/stumble");
+            return;
+        }
         // every hit rocks him a little (no ragdoll); a stumble started below takes over from the pose on screen
-        if (entry.HitNudgeOn.Value && (existing == null || !existing.Busy))
+        // (its hit flinch does this job when it's installed)
+        if (entry.HitNudgeOn.Value && !AmosBridge.FlinchesHits && (existing == null || !existing.Busy))
             HitNudge.Hit(__instance, bodyPartType, damageInfo.HitPoint, damageInfo.Direction, PushFor(damageInfo.Damage), damageInfo.Damage);
+        if (AmosBridge.OwnsBlast(damageInfo))
+        {
+            AmosBridge.LogSkip(__instance, "explosion");
+            return;
+        }
         if (damageInfo.Player == null || damageInfo.Player.iPlayer == null)
         {
             return;

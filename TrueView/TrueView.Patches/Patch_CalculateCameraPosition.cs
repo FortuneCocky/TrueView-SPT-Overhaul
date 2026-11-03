@@ -75,8 +75,9 @@ internal class Patch_CalculateCameraPosition : ModulePatch
 
             if (!isLeftStance)
             {
-                __instance.HandsContainer.WeaponRoot.localRotation = ProceduralHipSystem.WeaponOffset * __instance.HandsContainer.WeaponRoot.localRotation;
+                __instance.HandsContainer.WeaponRoot.localRotation = BarrelAimSystem.Correction * ProceduralHipSystem.WeaponOffset * __instance.HandsContainer.WeaponRoot.localRotation;
                 ProceduralHipSystem.ApplyWeaponPosOffset(__instance.HandsContainer.WeaponRoot);
+                JitterProbe.AfterTrueView();
             }
         }
     }

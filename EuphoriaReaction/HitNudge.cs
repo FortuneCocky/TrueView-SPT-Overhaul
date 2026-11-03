@@ -78,13 +78,49 @@ internal partial class HitNudge : MonoBehaviour
     {
         if (p == null || dir.sqrMagnitude < 1e-6f) return;
         HitNudge n = p.GetComponent<HitNudge>();
-        if (n == null) { n = p.gameObject.AddComponent<HitNudge>(); p.gameObject.AddComponent<HitNudgeLate>(); } // the gun rides the chest (HitNudgeGun)
+        if (n == null) { n = p.gameObject.AddComponent<HitNudge>(); n._late = p.gameObject.AddComponent<HitNudgeLate>(); } // the gun rides the chest (HitNudgeGun)
+        n.Wake();
         var cfg = EuphoriaPlugin.Instance;
         bool heavy = (cfg?.HeavyNudge.Value ?? true) && damage >= (cfg?.HeavyNudgeDamage.Value ?? 35f)
                      && (part == EBodyPart.LeftArm || part == EBodyPart.RightArm || part == EBodyPart.LeftLeg || part == EBodyPart.RightLeg);
         strength *= cfg?.NudgeStrength.Value ?? 1f;
-        if (!heavy && (cfg?.PhysNudge.Value ?? true) && n.Poke(point, dir.normalized, strength)) return;
+        if (!heavy && (cfg?.PhysNudge.Value ?? true) && PokeWorthIt(point) && n.Poke(point, dir.normalized, strength)) return;
         n.Kick(part, point, dir.normalized, strength, heavy);
+    }
+
+    private HitNudgeLate _late;
+
+    /// Both passes on again (a hit).
+    private void Wake()
+    {
+        enabled = true;
+        if (_late == null) _late = GetComponent<HitNudgeLate>();
+        if (_late != null) _late.enabled = true;
+    }
+
+    /// At rest: both passes off. Unity calls nothing on them until the next hit wakes them.
+    private void Sleep()
+    {
+        enabled = false;
+        if (_late == null) _late = GetComponent<HitNudgeLate>();
+        if (_late != null) _late.enabled = false;
+    }
+
+    /// A physical nudge only where it can be seen: far off (config) or off screen, the spring nudge, which
+    /// reads the same from there and costs nothing. Its doll steps 60 times a second for up to 3 s.
+    private static bool PokeWorthIt(Vector3 point)
+    {
+        var cfg = EuphoriaPlugin.Instance;
+        if (cfg == null) return true;
+        float range = cfg.PhysNudgeRange.Value;
+        bool offScreen = cfg.PhysNudgeOffScreen.Value;
+        if (range <= 0f && offScreen) return true;
+        Camera cam = Camera.main;
+        if (cam == null) return true;
+        Vector3 v = cam.WorldToViewportPoint(point);
+        if (range > 0f && (point - cam.transform.position).sqrMagnitude > range * range) return false;
+        if (!offScreen && (v.z <= 0f || v.x < -0.15f || v.x > 1.15f || v.y < -0.15f || v.y > 1.15f)) return false;
+        return true;
     }
 
     // ---------------------------------------------------------------- physical nudge
@@ -126,7 +162,18 @@ internal partial class HitNudge : MonoBehaviour
 
     private bool DollUp()
     {
-        if (_na != System.IntPtr.Zero) return true;
+        DollStepper.Ensure();
+        if (_na != System.IntPtr.Zero)
+        {
+            if (!_dollLive) { _dollLive = true; _acc = 0f; } // his own doll, parked settled since his last nudge
+            return true;
+        }
+        if (NudgeDolls.Take(out _nw, out _na, _restPos, _restRot)) // one settled ahead of time, off the main thread
+        {
+            _yaw0 = 0f; // made facing the world's +z (NudgeDolls)
+            _acc = 0f; _dollLive = true;
+            return true;
+        }
         _nw = Delirium.Native.nm_world_create();
         if (_nw == System.IntPtr.Zero) return false;
         Delirium.Native.nm_world_add_floor(_nw, 0f, 0f, 0f, 20f);
@@ -141,7 +188,7 @@ internal partial class HitNudge : MonoBehaviour
             Delirium.Native.nm_agent_get_part_transform(_na, k, _p3, _q4);
             _restPos[k] = U(_p3); _restRot[k] = UQ(_q4);
         }
-        _acc = 0f;
+        _acc = 0f; _dollLive = true;
         return true;
     }
 
@@ -150,6 +197,7 @@ internal partial class HitNudge : MonoBehaviour
         if (_na != System.IntPtr.Zero) Delirium.Native.nm_agent_destroy(_na);
         if (_nw != System.IntPtr.Zero) Delirium.Native.nm_world_destroy(_nw);
         _na = _nw = System.IntPtr.Zero;
+        _dollLive = false;
     }
 
     private void OnDestroy() => DollDown();
@@ -159,19 +207,7 @@ internal partial class HitNudge : MonoBehaviour
     /// LateUpdate: step the doll, then lay its swing over the animation. False once it has settled.
     private bool DollPose(float dt)
     {
-        _acc += dt;
-        while (_acc >= 1f / 60f)
-        {
-            _acc -= 1f / 60f;
-            foreach (int k in Pinned)
-            {
-                Nm(_restPos[k], _p3);
-                Quaternion r = _restRot[k];
-                _q4[0] = -r.x; _q4[1] = -r.z; _q4[2] = -r.y; _q4[3] = r.w;
-                Delirium.Native.nm_agent_set_part_state(_na, k, _p3, _q4, _z3b, _z3b);
-            }
-            Delirium.Native.nm_agent_step(_na, _nw, 1f / 60f);
-        }
+        if (_steppedFrame != Time.frameCount) StepDoll(dt); // else stepped already, beside the other dolls (NudgeStepper)
         for (int k = 0; k < 21; k++)
         {
             Delirium.Native.nm_agent_get_part_transform(_na, k, _p3, _q4);
@@ -194,8 +230,30 @@ internal partial class HitNudge : MonoBehaviour
             b.rotation = Quaternion.AngleAxis(ang, turn * axis) * b.rotation;
         }
         _quietFor = most < 0.4f ? _quietFor + dt : 0f;
-        if (age > PokeLife || (age > 0.4f && _quietFor > 0.25f)) { DollDown(); return false; }
+        // settled: parked for his next nudge (a new doll costs 15 settling steps); still swinging at the end
+        // of its life: gone, so a later nudge never starts from an old swing
+        if (age > 0.4f && _quietFor > 0.25f) { _dollLive = false; return false; }
+        if (age > PokeLife) { DollDown(); return false; }
         return true;
+    }
+
+    /// The doll's steps for this frame's time, its pelvis and feet held where they rest. Native calls on
+    /// its own doll only, so it may run on a doll-step worker (NudgeStepper).
+    private void StepDoll(float dt)
+    {
+        _acc += dt;
+        while (_acc >= 1f / 60f)
+        {
+            _acc -= 1f / 60f;
+            foreach (int k in Pinned)
+            {
+                Nm(_restPos[k], _p3);
+                Quaternion r = _restRot[k];
+                _q4[0] = -r.x; _q4[1] = -r.z; _q4[2] = -r.y; _q4[3] = r.w;
+                Delirium.Native.nm_agent_set_part_state(_na, k, _p3, _q4, _z3b, _z3b);
+            }
+            Delirium.Native.nm_agent_step(_na, _nw, 1f / 60f);
+        }
     }
 
     private static Vector3 U(float[] v) => new Vector3(v[0], v[2], v[1]);
@@ -294,7 +352,13 @@ internal partial class HitNudge : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (!_moving || _bones == null) { if (_bones != null && _gunSetValid) RideBegin(); _ride = false; return; }
+        if (!_moving || _bones == null)
+        {
+            if (_bones != null && _gunSetValid) RideBegin();
+            _ride = false;
+            if (!_gunSetValid) Sleep(); // at rest, the gun given back: nothing to do until the next hit
+            return;
+        }
         NmBody body = _p != null ? _p.GetComponent<NmBody>() : null;
         if (body != null && body.Busy || _p == null || !_p.HealthController.IsAlive) { Rest(); return; } // Euphoria owns the bones
 
@@ -303,7 +367,7 @@ internal partial class HitNudge : MonoBehaviour
         RideBegin();
         bool any = false;
         foreach (int k in Kept) if (_bones[k] != null) _keptRot[k] = _bones[k].rotation;
-        if (_na != System.IntPtr.Zero) any = DollPose(dt); // the physical nudge first: the springs (heavy nudge) ride on it
+        if (_na != System.IntPtr.Zero && _dollLive) any = DollPose(dt); // the physical nudge first: the springs (heavy nudge) ride on it
         int steps = Mathf.Max(1, Mathf.CeilToInt(dt / MaxStep));
         float h = dt / steps;
         foreach (int k in Nudged) // parent-first, so a child's nudge rides on its parent's

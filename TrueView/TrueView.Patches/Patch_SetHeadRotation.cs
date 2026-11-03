@@ -47,6 +47,7 @@ internal class Patch_SetHeadRotation : ModulePatch
 
 		// Base rotation: ProceduralHipSystem owns the weapon deadzone for both
 		// hip and ADS, detaching the camera from the raw mouse rotation.
+		Vector3 vanillaRot = headRot;
 		Vector3 baseRot = ProceduralHipSystem.Modify(headRot);
 
 		if (ProceduralHipSystem.ControlsCamera)
@@ -63,6 +64,17 @@ internal class Patch_SetHeadRotation : ModulePatch
 		}
 
 		headRot = TurnInPlaceSystem.ModifyCamera(headRot);
+
+		// Through a magnified scope the view is the game's own: lean, roll,
+		// momentum, camera lag and the deadzone camera all hand back.
+		float scoped = ScopeOpticsSystem.Magnified;
+		if (scoped > 0f)
+		{
+			headRot = new Vector3(
+				vanillaRot.x + Mathf.DeltaAngle(vanillaRot.x, headRot.x) * (1f - scoped),
+				vanillaRot.y + Mathf.DeltaAngle(vanillaRot.y, headRot.y) * (1f - scoped),
+				vanillaRot.z + Mathf.DeltaAngle(vanillaRot.z, headRot.z) * (1f - scoped));
+		}
 		HandlingState.HeadRotation = headRot;
 	}
 }

@@ -32,13 +32,17 @@ internal partial class NmBody
         if (t > _pfBakeMax) _pfBakeMax = t;
     }
 
+    // (may run on a doll-step worker thread: this bot's fields only)
     private void PerfStep(long from) { _pfStepSum += Stopwatch.GetTimestamp() - from; _pfSteps++; }
 
     /// Update and LateUpdate of one frame add up to one frame's cost.
-    private void PerfFrame(long from)
+    private void PerfFrame(long from) => PerfFrame(from, 0);
+
+    /// `extra`: this bot's share of time spent outside the measured span (the side-by-side doll steps).
+    private void PerfFrame(long from, long extra)
     {
         if (!Active && _pfFrameNo < 0) return;
-        long t = Stopwatch.GetTimestamp() - from;
+        long t = Stopwatch.GetTimestamp() - from + extra;
         if (_pfFrameNo != Time.frameCount) { PerfCloseFrame(); _pfFrameNo = Time.frameCount; }
         _pfThisFrame += t;
     }

@@ -15,7 +15,8 @@ namespace EuphoriaReaction;
 /// balance task tries to catch him — catch-steps, buckling, falls — until
 /// the body settles and the animation takes back over.
 /// </summary>
-[BepInPlugin("com.euphoria.reaction", "Euphoria Reaction", "2.0.0")]
+[BepInDependency(AmosBridge.Guid, BepInDependency.DependencyFlags.SoftDependency)] // loads after it, so its config and types are there in Awake
+[BepInPlugin("com.euphoria.reaction", "Euphoria Reaction", "2.1.0")]
 public partial class EuphoriaPlugin : BaseUnityPlugin
 {
     public static EuphoriaPlugin Instance { get; private set; }
@@ -26,6 +27,9 @@ public partial class EuphoriaPlugin : BaseUnityPlugin
     public ConfigEntry<bool> HitNudgeOn { get; private set; }
     public ConfigEntry<float> NudgeStrength { get; private set; }
     public ConfigEntry<bool> PhysNudge { get; private set; }
+    public ConfigEntry<float> PhysNudgeRange { get; private set; }
+    public ConfigEntry<bool> PhysNudgeOffScreen { get; private set; }
+    public ConfigEntry<bool> ThreadedSteps { get; private set; }
     public ConfigEntry<bool> HeavyNudge { get; private set; }
     public ConfigEntry<float> HeavyNudgeDamage { get; private set; }
     public ConfigEntry<float> HeavyNudgeTime { get; private set; }
@@ -86,6 +90,8 @@ public partial class EuphoriaPlugin : BaseUnityPlugin
     public ConfigEntry<bool> BossGate { get; private set; }
     public ConfigEntry<bool> VerboseLog { get; private set; }
     public ConfigEntry<float> BossHp { get; private set; }
+    public ConfigEntry<bool> AmosCoop { get; private set; }
+    public ConfigEntry<bool> AmosTurnOff { get; private set; }
 
     internal static void Log(object msg) => Instance?.Logger.LogInfo(msg);
     /// Only written when "Verbose log" is on (Debug section, advanced).
@@ -172,6 +178,14 @@ public partial class EuphoriaPlugin : BaseUnityPlugin
         BossGate = Config.Bind("6. Bosses", "Bosses only stumble when nearly dead", true, "A boss only gets a Euphoria stumble when the hit meets the normal bullet requirement (score roll, penetration, caliber...) AND his health is at or below the limit below. Death struggles still play.");
         BossHp = Config.Bind("6. Bosses", "Boss health limit", 0.30f, new ConfigDescription("Fraction of total health at or below which a boss can stumble.", new AcceptableValueRange<float>(0.05f, 1f)));
 
+        const string Perf = "10. Performance";
+        ThreadedSteps = Config.Bind(Perf, "Step dolls side by side", true, "The physics dolls (every reacting bot, every hit nudge) step at the same time on a few worker threads instead of one after another on the main thread. Same physics, same result; with several bots reacting at once it saves several ms a frame. Off = all on the main thread, as before.");
+        PhysNudgeRange = Config.Bind(Perf, "Physical hit nudge range (m)", 100f, new ConfigDescription("Hit nudges on bots further from your camera than this use the simple spring nudge instead of a physics doll of their own (each doll steps 60 times a second for up to 3 s). 0 = physical at any range.", new AcceptableValueRange<float>(0f, 500f)));
+        PhysNudgeOffScreen = Config.Bind(Perf, "Physical hit nudge off screen", false, "Off: a bot hit while off screen (behind you, out of view) gets the spring nudge, which nobody sees anyway. On: physical wherever he is.");
+
+        AmosCoop = Config.Bind("8. Euphoria Style Physics", "Work with Euphoria Style Physics", true, "When amos's Euphoria Style Physics is installed, each bot belongs to one mod at a time. Ours: living stumbles, balance, falls and get-ups. Its: deaths and corpses (while its Dying with muscles is on), hit flinch (our hit nudge is off while its flinch is on), stagger and explosions. Its hit handlers leave a bot ours has alone, and ours leaves a bot its knockdown has. Off: both act on every bot (they fight). No effect without it.");
+        AmosTurnOff = Config.Bind("8. Euphoria Style Physics", "Turn off its stumble and knockdowns", true, "At game start, its 5. Stumble and 6. Knockdowns main switches are turned off: they do what ours does. Off: they are left as you set them (only a warning in the log), and a bot they take is left to it.");
+
         // ---- Debug: everything below is Advanced (only shown with "Show advanced settings" in the config manager)
         const string D = "9. Debug (advanced)";
         BallisticShove = Config.Bind(D, "Ballistic bullet shove", true, Adv("The shove comes from the round itself: bullet mass x velocity (the gun's barrel/mod speed factor, slowed over range), how much of it stays in the body (plate-stopped = all, over-penetrating high-pen rounds = less) and its damage. Off = the old shove from the stumble score only. The breakdown is written with 'Log stumble scores'.", 12));
@@ -206,6 +220,7 @@ public partial class EuphoriaPlugin : BaseUnityPlugin
         catch (System.Exception e) { Logger.LogError($"getups.bin: {e.Message}"); }
         Logger.LogInfo("Delirium engine loaded — Euphoria reactions armed.");
         new HitReactionPatch().Enable();
+        try { AmosBridge.Init(AmosTurnOff); } catch (System.Exception e) { Logger.LogError($"Euphoria Style Physics bridge: {e.Message}"); }
         try { FireBlock.Install(); } catch (System.Exception e) { Logger.LogError($"fire block: {e.Message}"); }
         try { MedsGuard.Install(); } catch (System.Exception e) { Logger.LogError($"meds guard: {e.Message}"); }
         try { EuphoriaHold.Install(); } catch (System.Exception e) { Logger.LogError($"hold: {e.Message}"); }

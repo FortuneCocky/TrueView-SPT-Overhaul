@@ -112,8 +112,6 @@ internal static class BodyCamSystem
     /// </summary>
     public static void OnHitTaken(EBodyPart part, Vector3 direction, float damage, Player player)
     {
-        if (HandlingConfig.HitReactionEnabled?.Value != true)
-            return;
         float s = (HandlingConfig.HitReactionStrength?.Value ?? 0.8f) * Mathf.Clamp(0.35f + damage / 40f, 0.35f, 1.5f);
         if (s <= 0f)
             return;
@@ -167,7 +165,9 @@ internal static class BodyCamSystem
         // everything settle back to zero instead of snapping.
         bool on = HandlingState.Enabled && HandlingConfig.BodyCamEnabled?.Value == true;
         _adsBlend = Mathf.MoveTowards(_adsBlend, HandlingState.IsAiming ? 1f : 0f, 6f * dt);
-        float bodyScale = 1f - _adsBlend * Mathf.Clamp01(HandlingConfig.BodyCamAdsFade?.Value ?? 1f);
+        // A scope magnifies every wobble of the head, so it always fades fully there.
+        float adsFade = Mathf.Max(Mathf.Clamp01(HandlingConfig.BodyCamAdsFade?.Value ?? 1f), ScopeOpticsSystem.Magnified);
+        float bodyScale = 1f - _adsBlend * adsFade;
 
         TickTorsoLag(on, dt);
         TickSteps(player, on, dt);

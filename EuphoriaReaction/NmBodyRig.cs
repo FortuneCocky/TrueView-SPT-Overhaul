@@ -230,6 +230,8 @@ internal partial class NmBody
                 float off = Quaternion.Angle(Quaternion.Inverse(rest[pa]) * rest[k], _legRef[k]);
                 float roll = RollAgainst(rest, k, pa, c, _legRef[k], out Vector3 axis);
                 sb.Append(' ').Append(_bones[k].name.Replace("Base Human", "")).Append($" {off:F0} (roll {roll:+0;-0})");
+                float aim = _legRefConfirmed && off > LegRefSnap ? RefAimTurn(rest, k, pa, c) : 0f;
+                if (aim > LegRefAimMax) { sb.Append($" kept (the reference points it {aim:F0} off his bones)"); continue; }
                 if (_legRefConfirmed && off > LegRefSnap) rest[k] = rest[pa] * _legRef[k];
                 else if (!_legRefConfirmed && Mathf.Abs(roll) > 90f) rest[k] = rest[k] * Quaternion.AngleAxis(roll, axis);
                 else continue;
@@ -257,13 +259,15 @@ internal partial class NmBody
         // the reference: only from a clean outfit (nothing corrected, every leg bone bound), and trusted once
         // two clean bots agree on it. One that disagrees with it is kept as a candidate; a second clean bot
         // agreeing with the candidate replaces it.
-        bool clean = _legRollFixed == 0 && _legAimFixed == 0 && !_legsFromLive;
+        bool frozen = false;
+        bool clean = _legRollFixed == 0 && _legAimFixed == 0 && !_legsFromLive && !frozen;
         var r = new Quaternion[Parts];
         foreach (var (k, pa, _) in LegRoll) r[k] = Quaternion.Inverse(rest[pa]) * rest[k];
         LoadLegReference();
         float vsRef = _legRef != null ? LegRelOff(r, _legRef) : -1f;
         string note;
-        if (!clean) note = "corrected outfit, not used for the reference";
+        if (frozen) note = "frozen in dev mode, not used for the reference";
+        else if (!clean) note = "corrected outfit, not used for the reference";
         else if (_legRef == null) { SaveLegReference(r, false); note = "first reference saved"; }
         else if (vsRef <= LegRefAgree)
         {
@@ -278,7 +282,7 @@ internal partial class NmBody
         }
         else { _legCandidate = r; _legCandidateBot = _p.ProfileId; note = "disagrees - kept as a candidate"; }
         EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} standing - leg rest {(vsRef >= 0f ? $"{vsRef:F0} deg" : "n/a")} from the {(_legRefConfirmed ? "confirmed" : "unconfirmed")} reference: {note}");
-        if (!clean) SnapToReference(rest, "standing, corrected outfit");
+        if (!clean && !frozen) SnapToReference(rest, "standing, corrected outfit");
     }
 
     /// Against a confirmed reference, any leg bone's rest further than LegRefSnap from it takes it (thigh
@@ -287,11 +291,13 @@ internal partial class NmBody
     {
         if (!_legRefConfirmed || _legRef == null) return;
         var sb = new StringBuilder();
-        foreach (var (k, pa, _) in LegRoll)
+        foreach (var (k, pa, c) in LegRoll)
         {
             if (_bones[k] == null) continue;
             float off = Quaternion.Angle(Quaternion.Inverse(rest[pa]) * rest[k], _legRef[k]);
             if (off <= LegRefSnap) continue;
+            float aim = RefAimTurn(rest, k, pa, c);
+            if (aim > LegRefAimMax) { sb.Append(' ').Append(_bones[k].name.Replace("Base Human", "")).Append($" {off:F0} kept (the reference points it {aim:F0} off his bones)"); continue; }
             rest[k] = rest[pa] * _legRef[k];
             _legRollFixed++;
             sb.Append(' ').Append(_bones[k].name.Replace("Base Human", "")).Append($" {off:F0}");
@@ -300,6 +306,21 @@ internal partial class NmBody
     }
 
     private const float LegRefSnap = 30f;  // deg: a leg rest further than this from the confirmed reference takes the reference
+    private const float LegRefAimMax = 25f; // deg: ... unless the reference would turn the bone this far off his own bones (FixLegAim's limit)
+
+    /// How far (deg) taking the reference would turn leg bone k's line (to its child) off the one his rest has.
+    /// The reference is there for outfit meshes that roll a leg bone about its length, which leaves its line
+    /// alone. Some bots' rests agree with their own bones (aim 0) and still sit 90 deg off the reference on every
+    /// leg bone (a skeleton the reference wasn't taken from): snapped, the doll's hips were seeded 136-168 deg off
+    /// his, and his feet and thighs turned 80-135 deg about themselves (leg roll log), prone takeovers above all.
+    private float RefAimTurn(Quaternion[] rest, int k, int pa, int c)
+    {
+        Transform b = _bones[k], ch = _bones[c];
+        if (b == null || ch == null) return 0f;
+        Vector3 live = Quaternion.Inverse(b.rotation) * (ch.position - b.position); // its line, own frame (pose-independent)
+        if (live.sqrMagnitude < 1e-8f) return 0f;
+        return Vector3.Angle(rest[k] * live, rest[pa] * _legRef[k] * live);
+    }
     private const float LegRefAgree = 10f; // deg: two leg rests this close are the same skeleton
     private const float StandingRollMax = 45f; // deg: a standing leg bone's roll against its rest past this is the outfit mesh's
     private static bool _legRefConfirmed;

@@ -135,6 +135,7 @@ internal static class HandlingManager
             AdrenalineSystem.Tick(player, dt);
             BreathingSystem.Tick(player, dt);
             SprintCancelSystem.Tick(player);
+            ScopeOpticsSystem.Tick(player, dt);
             if (HandlingState.HasWeapon)
             {
                 AimingSystem.Apply();
@@ -183,6 +184,8 @@ internal static class HandlingManager
         InjuryHandlingSystem.Reset();
         MotionTracker.Reset(player);
         FluidMovementSystem.Reset();
+        BarrelAimSystem.Reset();
+        ScopeOpticsSystem.Reset();
         if (player != null && player.ProceduralWeaponAnimation != null)
         {
             player.ProceduralWeaponAnimation.UpdateWeaponVariables();

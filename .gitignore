@@ -8,3 +8,6 @@ build_log.txt
 *.bin
 *.zip
 metadump/
+
+# HardcoreDMG server mod manifest
+!HardcoreDMG/Server/package.json

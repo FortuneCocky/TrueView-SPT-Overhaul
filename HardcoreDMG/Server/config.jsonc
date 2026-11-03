@@ -1,0 +1,30 @@
+{
+    // HardcoreDMG server config
+    // Reshapes bot and player HP when the server starts. Damage zones, bleeding,
+    // weapon drops and falls are client-side (HardcoreDMG-Client.dll, F12 in game).
+    "Enabled": true,
+
+    // Body model: rebuilds a group's HP from HardcoreDMG's base body
+    // (head 22, chest 115, stomach 105, arms 58, legs 68). Named bosses and
+    // guards get their own builds on top (Killa, Tagilla, the Goons, etc.).
+    // Off = the group keeps its vanilla HP.
+    "BodyModel": {
+        "Regulars": true,   // scavs, PMCs, snipers, and any role not listed elsewhere
+        "Guards": true,     // boss guards
+        "Raiders": true,    // raiders and rogues
+        "Cultists": true,   // cultist warriors (the priest counts as a boss)
+        "Bosses": true,     // bosses, the Goons and the cultist priest
+        "Infected": false   // infected: tanky torso and limbs (about 275-345 chest), normal head
+    },
+
+    // Toughness: scales HP per tier after the body model. 1.00 = unchanged.
+    // Range 0.25 - 4.00.
+    "Toughness": {
+        "Regulars": 0.80,
+        "Elites": 0.90,     // guards, raiders, rogues, cultist warriors
+        "Bosses": 1.20
+    },
+
+    // Scales the player's max HP on every body part. 1.00 = unchanged. Range 0.25 - 4.00.
+    "PlayerVitality": 1.00
+}

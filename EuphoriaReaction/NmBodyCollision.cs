@@ -135,9 +135,12 @@ internal partial class NmBody
     /// higher than a step becomes a solid column from the floor up (false); one already baked as its
     /// real shape is left to it (false); walls are for the wall pass (false).
     private bool GroundSample(Vector3 from, int mask, Vector3 feet, System.Collections.Generic.HashSet<Collider> baked,
-                              System.Collections.Generic.List<float> pos, System.Collections.Generic.List<uint> tris, ref int columns, out RaycastHit gh)
+                              System.Collections.Generic.List<float> pos, System.Collections.Generic.List<uint> tris, ref int columns, out RaycastHit gh,
+                              int bakeRay = -1)
     {
-        if (!GroundRay(from, mask, out gh) || gh.normal.y < 0.35f) return false;
+        // bakeRay: this sample's ray from the bake's batch (NmBodyBakeRays), already cast
+        bool hit = bakeRay >= 0 ? BakeRayHit(bakeRay, out gh) : GroundRay(from, mask, out gh);
+        if (!hit || gh.normal.y < 0.35f) return false;
         float up = gh.point.y - feet.y;
         if (up <= StepHeight) return true;
         if (baked.Contains(gh.collider)) return false; // a rail keeps the open space under it

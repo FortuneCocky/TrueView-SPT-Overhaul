@@ -215,7 +215,7 @@ internal static class MomentumSystem
 		float speed01 = Mathf.Clamp01(new Vector2(sideSpeed, forwardSpeed).magnitude / 5f);
 		float turn01 = Mathf.Clamp(_smoothedYawRate / ReferenceTurnRate, -2f, 2f);
 		float turnAccel01 = Mathf.Clamp(_smoothedYawAcceleration / 900f, -1f, 1f);
-		float turnStrength = HandlingConfig.MomentumTurn.Value;
+		float turnStrength = 0.5492957f * HandlingConfig.TurnRollScale;
 		float startLean = HandlingConfig.MomentumStartLean?.Value ?? 1f;
 		float strafeLean = HandlingConfig.MomentumStrafeLean?.Value ?? 1f;
 

@@ -34,7 +34,7 @@ internal static class LocomotionGaitSystem
 
     public static void Tick(Player player, float deltaTime)
     {
-        if (player?.MovementContext?.CurrentState == null || HandlingConfig.GaitEnabled?.Value != true)
+        if (player?.MovementContext?.CurrentState == null)
         {
             Reset();
             return;
@@ -44,7 +44,7 @@ internal static class LocomotionGaitSystem
         ELocomotionGait targetGait = ResolveGait(player);
         Profile(targetGait, out float targetCadence, out float targetCamera, out float targetWeaponFollow, out float targetMomentum);
 
-        float transition = HandlingConfig.GaitTransitionSpeed.Value;
+        const float transition = 6f; // how quickly the body blends between gaits
         float t = 1f - Mathf.Exp(-transition * dt);
         _cadence = Mathf.Lerp(_cadence, targetCadence, t);
         _cameraAmplitude = Mathf.Lerp(_cameraAmplitude, targetCamera, t);

@@ -51,12 +51,11 @@ internal partial class NmBody
         catch (System.Exception e) { EuphoriaPlugin.Log("Delirium: rest pose: " + e.Message); return; }
 
         float worst = 0f; int used = 0;
-        foreach (var (bone, child) in LockOrder)
+        foreach (var (bone, _) in LockOrder)
         {
             Transform b = _bones[bone];
             if (b == null || b.parent == null || !_restWorld.ContainsKey(b)) continue;
             Quaternion local = Quaternion.Inverse(RestWorld(b.parent, 0)) * _restWorld[b];
-            if (bone <= 6) local = LegRestTwist(bone, child, local, _lockRest[bone]); // a leg rolled by the outfit mesh
             worst = Mathf.Max(worst, Quaternion.Angle(local, _lockRest[bone]));
             _lockRest[bone] = local;
             used++;

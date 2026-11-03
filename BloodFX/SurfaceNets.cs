@@ -124,6 +124,14 @@ internal static class SurfaceNets
         return k1 > 1e-6f ? k0 * (k0 - 1f) / k1 : -Mathf.Min(r.x, Mathf.Min(r.y, r.z));
     }
 
+    /// <summary>Box with half-extents <paramref name="half"/>, its edges rounded off by <paramref name="r"/>.</summary>
+    public static float RoundBox(Vector3 p, Vector3 c, Vector3 half, float r)
+    {
+        Vector3 q = p - c;
+        q = new Vector3(Mathf.Abs(q.x) - half.x, Mathf.Abs(q.y) - half.y, Mathf.Abs(q.z) - half.z);
+        return Vector3.Max(q, Vector3.zero).magnitude + Mathf.Min(Mathf.Max(q.x, Mathf.Max(q.y, q.z)), 0f) - r;
+    }
+
     /// <summary>Union that melts the two shapes together over <paramref name="k"/> metres.</summary>
     public static float SmoothMin(float a, float b, float k)
     {

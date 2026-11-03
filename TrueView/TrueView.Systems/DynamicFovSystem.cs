@@ -72,6 +72,8 @@ internal static class DynamicFovSystem
             target = 1f + HandlingConfig.DynamicFovAds.Value * 0.01f;
 
         target *= AdrenalineSystem.FovFactor;
+        // Through a magnified scope the game's own FOV stays.
+        target = Mathf.Lerp(target, 1f, ScopeOpticsSystem.Magnified);
         _factor = Mathf.Lerp(_factor, target, 1f - Mathf.Exp(-5f * dt));
         if (Mathf.Abs(_factor - 1f) < 0.0005f && target == 1f)
             _factor = 1f;

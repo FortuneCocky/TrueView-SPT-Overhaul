@@ -223,7 +223,7 @@ internal partial class NmBody
                 _bones[k].localRotation = Quaternion.Slerp(_bones[k].localRotation, _stanceLocal[k], k <= 6 ? w * legs : w);
     }
 
-    /// Put the game into the stance: straight on his movement (as the dev panel's force pose does) and
+    /// Put the game into the stance: straight on his movement and
     /// through the bot AI too, so the AI's own stance doesn't undo it.
     private void ApplyStance(StartPose to)
     {

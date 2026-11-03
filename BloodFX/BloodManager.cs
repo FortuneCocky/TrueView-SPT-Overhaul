@@ -13,7 +13,7 @@ namespace BloodFX;
 /// drips and death pools out of fixed-size slot arrays. Nothing on the hit
 /// path allocates.
 /// </summary>
-public class BloodManager : MonoBehaviour
+public partial class BloodManager : MonoBehaviour
 {
     public static BloodManager Instance { get; private set; }
 
@@ -68,7 +68,7 @@ public class BloodManager : MonoBehaviour
     private BloodTrails _trails;
     private BrainChunks _brains;
     private HeadGib _heads;
-    private int _decapitations, _halfHeads;
+    private int _decapitations, _faceWounds;
     // frame-time load: 1 = full effects, down to 0.3 when frames run slower than usual
     private float _load = 1f, _fastDt, _slowDt;
     private readonly PendingDrop[] _pendingDrops = new PendingDrop[PendingDropSlots];
@@ -123,6 +123,9 @@ public class BloodManager : MonoBehaviour
         _puddles = new BloodPools(transform, liquidMat, PuddleCapacity(), _mask);
         _splats = new BloodPools(transform, liquidMat, SplatCapacity(), _mask);
         _trails = new BloodTrails(transform, liquidMat, TrailCapacity(), _mask);
+        _smears = new DragSmears(transform, liquidMat, SmearCapacity());
+        _prints = new Footprints(transform, liquidMat, PrintCapacity());
+        StepSplash.Load(this);
         _streams = new BloodStreams(transform, liquidMat, _tier.Streams, _tier.Rings);
         _brains = new BrainChunks(transform, liquidMat, BrainCapacity(), _mask);
         _brains.Landed = OnChunkLanded;
@@ -339,6 +342,8 @@ public class BloodManager : MonoBehaviour
         if (_puddles.Capacity != Mathf.Clamp(PuddleCapacity(), 4, 128)) _puddles.Resize(PuddleCapacity());
         if (_splats.Capacity != Mathf.Clamp(SplatCapacity(), 4, 128)) _splats.Resize(SplatCapacity());
         if (_trails.Capacity != Mathf.Clamp(TrailCapacity(), 4, 128)) _trails.Resize(TrailCapacity());
+        if (_smears.Capacity != SmearCapacity()) _smears.Resize(SmearCapacity());
+        if (_prints.Capacity != PrintCapacity()) _prints.Resize(PrintCapacity());
         if (_brains.Capacity != Mathf.Clamp(BrainCapacity(), 16, 512)) _brains.Resize(BrainCapacity());
         if (_streams.Capacity != Mathf.Clamp(_tier.Streams, 4, 512) || _streams.Rings != _tier.Rings)
             _streams.Resize(_tier.Streams, _tier.Rings);
@@ -357,6 +362,10 @@ public class BloodManager : MonoBehaviour
         _puddles.Clear();
         _splats.Clear();
         _trails.Clear();
+        _smears.Clear();
+        EndDragSession();
+        _prints.Clear();
+        ClearWet();
         _brains.Clear();
         _heads.Clear();
         for (int i = 0; i < PendingDropSlots; i++) _pendingDrops[i].Active = false;
@@ -396,6 +405,7 @@ public class BloodManager : MonoBehaviour
         bool melee = (type & EDamageType.Melee) != 0 && !blast;
 
         bool dead = victim.HealthController != null && !victim.HealthController.IsAlive;
+        if (di.HitCollider != null) NoteGore(victim, di.HitCollider.transform, di.Damage, part, dead);
         if (dead && _cfg.DeathPools.Value) QueuePool(victim);
 
         if (Time.frameCount != _frame) { _frame = Time.frameCount; _hitsThisFrame = 0; }
@@ -554,7 +564,7 @@ public class BloodManager : MonoBehaviour
             {
                 int n = 1;
                 for (int i = 0; i < n; i++)
-                    Stream(pt, Jitter(dir, 0.15f) * Random.Range(3f, 5.2f) * p, Random.Range(0.25f, 0.45f), 0.5f,
+                    Stream(pt, Jitter(dir, 0.15f) * Random.Range(3f, 5.2f) * p, Random.Range(0.25f, 0.45f), 0.8f,
                         Random.Range(0.024f, 0.04f) * scale, 0.75f, 0f, 0f, 1f, 1f, floorY, floorN, light, decalCol, now, null, i == 0);
                 break;
             }
@@ -578,7 +588,7 @@ public class BloodManager : MonoBehaviour
             {
                 // pumping jet: pressure pulses at heart rate, slowly dropping
                 Vector3 d = (Jitter(dir, 0.5f) + Vector3.up * 0.45f).normalized;
-                Stream(pt, d * Random.Range(2.2f, 3.2f), Random.Range(1.3f, 2.2f), 0.5f,
+                Stream(pt, d * Random.Range(2.2f, 3.2f), Random.Range(1.3f, 2.2f), 1.6f,
                     Random.Range(0.013f, 0.022f) * scale, 0.55f, Random.Range(1.4f, 2f), 0.5f, 0.8f, 1f, floorY, floorN, light, decalCol, now, anchor, true);
                 break;
             }
@@ -587,7 +597,7 @@ public class BloodManager : MonoBehaviour
                 Vector3 d = dir;
                 d.y = 0f;
                 d = (d.normalized * 0.6f + Vector3.down * 0.4f + Random.insideUnitSphere * 0.2f).normalized;
-                Stream(pt, d * Random.Range(0.6f, 1.3f), Random.Range(0.8f, 1.4f), 0.8f,
+                Stream(pt, d * Random.Range(0.6f, 1.3f), Random.Range(0.8f, 1.4f), 1.8f,
                     Random.Range(0.026f, 0.042f) * scale, 0.6f, 0f, 0f, 0.6f, 1f, floorY, floorN, light, decalCol, now, anchor, true);
                 break;
             }
@@ -654,12 +664,12 @@ public class BloodManager : MonoBehaviour
                 if (d.sqrMagnitude < 1e-3f) d = Random.insideUnitSphere;
                 d.y = 0f;
                 d = (d.normalized * 0.75f + Vector3.up * 0.1f + Random.insideUnitSphere * 0.15f).normalized;
-                Stream(pt, d * Random.Range(0.7f, 1.4f), Random.Range(1.2f, 2.4f), 0.9f,
-                    Random.Range(0.011f, 0.018f) * scale, 0.65f, Random.Range(1.1f, 1.6f), 0.22f, 0.35f, 1f, floorY, floorN, light, decalCol, now, anchor, true);
+                Stream(pt, d * Random.Range(0.7f, 1.4f), Random.Range(1.2f, 2.4f), 2f,
+                    Random.Range(0.013f, 0.02f) * scale, 0.65f, Random.Range(1.1f, 1.6f), 0.22f, 0.35f, 1f, floorY, floorN, light, decalCol, now, anchor, true);
                 break;
             }
             case Spurt.Dribble:
-                Stream(pt, (dir * 0.3f + Vector3.down * 0.2f) * Random.Range(0.5f, 1f), Random.Range(1f, 1.8f), 0.7f,
+                Stream(pt, (dir * 0.3f + Vector3.down * 0.2f) * Random.Range(0.5f, 1f), Random.Range(1f, 1.8f), 1.8f,
                     Random.Range(0.006f, 0.01f) * scale, 0.3f, 0f, 0f, 0.5f, 1f, floorY, floorN, light, decalCol, now, anchor, true);
                 break;
         }
@@ -685,46 +695,24 @@ public class BloodManager : MonoBehaviour
             float sz = Mathf.Clamp(radius * 14f * (1f + emit), 0.12f, 0.7f);
             QueueImpact(wall.point, wall.normal, vel / speed, now + wall.distance / speed, sz, 0.5f, floorY, light, decalCol);
         }
-        else if (splat)
-        {
-            float tl = BloodStreams.LandTime(origin, vel, 9.81f * gravity, floorY);
-            if (tl > 0f && tl < 3f)
-            {
-                Vector3 land = origin + vel * tl;
-                land.y = floorY;
-                Vector3 flat = new Vector3(vel.x, 0f, vel.z);
-                float hs = flat.magnitude;
-                if (hs > 0.8f)
-                {
-                    // hit the ground moving: sometimes the blood drags out into a smear along the travel direction
-                    if (Random.value < 0.35f)
-                    {
-                        float len = Mathf.Clamp(radius * 14f * (1f + emit) * Mathf.Sqrt(hs), 0.15f, 0.8f);
-                        float width = Mathf.Clamp(radius * 1.8f * (1f + emit * 0.3f), 0.012f, 0.055f);
-                        Trail(land, floorN, flat / hs, len, width, now + tl, Mathf.Clamp(len / (hs * 0.6f), 0.3f, 1.6f), light);
-                    }
-                }
-                else
-                {
-                    // a pour feeds a pool that keeps spreading for as long as it runs
-                    float sz = Mathf.Clamp(radius * 16f * (1f + emit), 0.15f, 0.9f);
-                    _puddles.Add(land, floorN, sz * 0.4f, Tint(PoolBase, light, 1f), now + tl,
-                        Mathf.Max(1f, life * 1.5f), _cfg.DecalLifetime.Value * 1.5f);
-                }
-            }
-        }
+        // where it lands on the floor is found live each frame (LandingTick): pool, streak or wall run
         _streams.Spawn(ref s, now);
 
-        // thin strands peeling off the main flow
-        if (radius < 0.016f || emit < 0.15f || _load < 0.7f) return;
+        // side strands: they share the rope's root, then peel off sideways a little way along and bead up sooner
+        if (radius < 0.012f || emit < 0.15f || _load < 0.7f) return;
         int strands = Random.Range(1, 3);
+        Vector3 across = Vector3.Cross(vel, Vector3.up);
+        if (across.sqrMagnitude < 1e-4f) across = Vector3.right;
+        across.Normalize();
         for (int i = 0; i < strands; i++)
         {
             BloodStreams.Spec t = s;
-            t.Velocity = vel * Random.Range(0.85f, 1.1f) + Random.insideUnitSphere * (0.12f * speed);
-            t.Radius = radius * Random.Range(0.22f, 0.35f);
+            t.Velocity = vel * Random.Range(0.92f, 1.05f);
+            t.Radius = radius * Random.Range(0.3f, 0.5f);
             t.Emit = emit * Random.Range(0.5f, 0.9f);
-            t.Breakup = breakup * 1.6f + 0.4f;
+            t.Breakup = breakup * 1.4f + 0.5f;
+            t.Drift = (across * (Random.value < 0.5f ? -1f : 1f) + Vector3.up * Random.Range(-0.3f, 0.3f)) * Random.Range(0.8f, 2.2f) * Mathf.Max(0.5f, speed);
+            t.DriftStart = Random.Range(0.06f, 0.2f);
             _streams.Spawn(ref t, now);
         }
     }
@@ -932,8 +920,8 @@ public class BloodManager : MonoBehaviour
         bool ok;
         Vector3 cut, up;
         Transform neck;
-        // most kills keep the entry side of the face; heavy rounds and the rest take the whole head
-        bool half = di.Damage < _cfg.WholeHeadDamage.Value && Random.value < _cfg.HalfFaceChance.Value;
+        // the face wound (one side of the face torn out, the rest of the head kept) is shelved: every head goes whole for now
+        bool half = false;
         try { ok = _heads.Dismember(victim, dir, ref half, light, _cfg.DecalLifetime.Value, now, out cut, out up, out neck); }
         catch (System.Exception e)
         {
@@ -942,14 +930,14 @@ public class BloodManager : MonoBehaviour
         }
         if (!ok) return;
         _decapitations++;
-        if (half) _halfHeads++;
+        if (half) _faceWounds++;
         Vector3 mid = half ? cut : cut + up * 0.08f;
         if (_cfg.BrainMatter.Value) BrainBurst(mid, (dir + Vector3.up * 0.3f).normalized, power * (half ? 1.2f : 1.5f), scale, light, now);
         MistBurst(mid, dir, power * 2f, scale, floorY, light, now);
         if (!_cfg.Streams.Value) return;
         if (half)
         {
-            // the open side of the head pours and drips; no neck jets, the neck is whole
+            // the torn face pours and drips; no neck jets, the neck is whole
             Spawn(Spurt.Pour, cut, up, power, scale, floorY, floorN, light, decalCol, now, neck);
             Spawn(Spurt.Gush, cut, up, power, scale, floorY, floorN, light, decalCol, now, neck);
             AddDrip(neck, cut, up, power, scale, light, now);
@@ -1361,8 +1349,8 @@ public class BloodManager : MonoBehaviour
                 BloodFXPlugin.Log.LogInfo($"BloodFX: hits seen {_seen}, spawned {_spawned}; skipped player {_skipPlayer}, armor/zero {_skipArmor}, " +
                     $"type {_skipType}, far {_skipFar}, budget {_skipBudget}; conforming marks {_marks.Built} (skinned {_marks.Skinned}, rigid {_marks.Rigid}, missed {_marks.Missed}); live streams {_streams.LiveCount}, blobs {_blobs.particleCount}, " +
                     $"decals {_decals.LiveCount}, body marks {_body.LiveCount}, stuck drops {_stuck.LiveCount}, pools {_puddles.LiveCount}, " +
-                    $"splats {_splats.LiveCount}, trails {_trails.LiveCount}, brain chunks {_brains.LiveCount}, " +
-                    $"load {_load:F2}, heads off {_decapitations} (half face {_halfHeads}; on bodies {_heads.CutCount}, shards {_heads.ShardCount})");
+                    $"splats {_splats.LiveCount}, trails {_trails.LiveCount}, drag smears {_smears.LiveCount}, footprints {_prints.LiveCount} ({_printsMade} made), brain chunks {_brains.LiveCount}, " +
+                    $"load {_load:F2}, heads off {_decapitations} (face wounds {_faceWounds}; on bodies {_heads.CutCount}, shards {_heads.ShardCount})");
             }
         }
         if (!_cfg.Enabled.Value) return;
@@ -1419,10 +1407,13 @@ public class BloodManager : MonoBehaviour
             Vector3 from = j.T.position + Vector3.up * 0.3f;
             if (!Physics.Raycast(from, Vector3.down, out RaycastHit hit, 2f, _mask, QueryTriggerInteraction.Ignore)) continue;
             Color32 col = Tint(PoolBase, LightAt(hit.point, hit.normal), 1f);
-            _puddles.Add(hit.point, hit.normal, j.Size * 0.5f, col, now, Random.Range(25f, 45f), _cfg.DecalLifetime.Value * 2f);
+            float grow = Random.Range(25f, 45f), poolLife = _cfg.DecalLifetime.Value * 2f;
+            _puddles.Add(hit.point, hit.normal, j.Size * 0.5f, col, now, grow, poolLife);
+            NoteWet(hit.point, hit.normal, j.Size * 0.5f, now, grow, poolLife);
         }
 
         _streams.Tick(now, haveEye ? eye : Vector3.zero);
+        LandingTick(now);
         _brains.Tick(now, Time.deltaTime, haveEye ? eye : Vector3.zero);
         _heads.Tick(now, Time.deltaTime);
         for (int i = 0; i < _streams.DetachCount; i++)
@@ -1431,11 +1422,15 @@ public class BloodManager : MonoBehaviour
             float fall = 1.2f;
             if (Physics.Raycast(d.Pos, Vector3.down, out RaycastHit hit, 3f, _mask, QueryTriggerInteraction.Ignore))
             {
-                fall = Mathf.Sqrt(2f * hit.distance / 9.81f);
-                DripSplash(hit.point, hit.normal, d.Radius, d.Col, now + fall);
+                float t = BloodStreams.LandTime(d.Pos, d.Vel, 9.81f, hit.point.y);
+                fall = t > 0f ? t : Mathf.Sqrt(2f * hit.distance / 9.81f);
+                Vector3 land = d.Pos + d.Vel * fall;
+                land.y = hit.point.y;
+                if (d.Vel.sqrMagnitude < 0.5f || Physics.Raycast(land + Vector3.up * 0.1f, Vector3.down, out hit, 0.3f, _mask, QueryTriggerInteraction.Ignore))
+                    DripSplash(hit.point, hit.normal, d.Radius, d.Col, now + fall);
             }
             _blobParams.position = d.Pos;
-            _blobParams.velocity = new Vector3(0f, -0.25f, 0f);
+            _blobParams.velocity = d.Vel;
             _blobParams.startLifetime = Mathf.Max(0.05f, fall);
             _blobParams.startSize3D = new Vector3(d.Radius * 2f, d.Radius * 2.6f, d.Radius * 2f);
             _blobParams.startColor = d.Col;
@@ -1454,6 +1449,9 @@ public class BloodManager : MonoBehaviour
         _puddles.Tick(now, eye, haveEye);
         _splats.Tick(now, eye, haveEye);
         _trails.Tick(now, eye, haveEye);
+        DragTick(now);
+        _smears.Tick(now, eye, haveEye);
+        _prints.Tick(now);
         _marks.Tick(now);
         _body.Tick(now, haveEye ? eye : Vector3.zero, haveEye ? _cfg.MaxDistance.Value * _cfg.MaxDistance.Value : float.MaxValue);
     }

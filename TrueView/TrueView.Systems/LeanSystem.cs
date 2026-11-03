@@ -26,11 +26,11 @@ internal static class LeanSystem
 		deltaTime = Mathf.Min(deltaTime, 1f / 15f);
 
 		float num = 0f;
-		if (HandlingConfig.LeanEnabled.Value && HandlingState.HasWeapon && player != null)
+		if (HandlingState.HasWeapon && player != null)
 		{
 			// Turns only: the strafe lean is MomentumSystem's, built from how you actually move.
 			float turn = Mathf.Clamp(MotionTracker.YawRateSlow / 180f, -1.5f, 1.5f);
-			num = turn * Mathf.Clamp01(HandlingConfig.LeanMultiplier.Value);
+			num = turn;
 			if (HandlingState.IsAiming)
 			{
 				num *= 0.55f;
@@ -45,17 +45,8 @@ internal static class LeanSystem
 
 	public static Vector3 Modify(Vector3 headRotation)
 	{
-		headRotation.z -= _lean * HandlingConfig.LeanCameraAngle.Value;
+		headRotation.z -= _lean * 2.5f * HandlingConfig.TurnRollScale;
 		return headRotation;
-	}
-
-	public static float WeaponRoll()
-	{
-		if (!HandlingConfig.LeanEnabled.Value)
-		{
-			return 0f;
-		}
-		return (0f - _lean) * HandlingConfig.LeanWeaponAngle.Value;
 	}
 
 	public static void Reset()

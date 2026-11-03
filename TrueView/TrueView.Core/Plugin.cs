@@ -7,14 +7,14 @@ using UnityEngine;
 
 namespace TrueView.Core;
 
-[BepInPlugin("com.trueview", "TrueView", "2.1.2")]
+[BepInPlugin("com.trueview", "TrueView", "2.2.0")]
 public class Plugin : BaseUnityPlugin
 {
 	public const string GUID = "com.trueview";
 
 	public const string Name = "TrueView";
 
-	public const string Version = "2.1.2";
+	public const string Version = "2.2.0";
 
 	private void Awake()
 	{

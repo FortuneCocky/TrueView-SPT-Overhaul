@@ -46,7 +46,7 @@
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.AnimationModule">
-      <HintPath>..\..\SPT 4.1.6\EscapeFromTarkov_Data\Managed\UnityEngine.AnimationModule.dll</HintPath>
+      <HintPath>$(ManagedDir)\UnityEngine.AnimationModule.dll</HintPath>
     </Reference>
     <Reference Include="UnityEngine.PhysicsModule">
       <HintPath>$(ManagedDir)\UnityEngine.PhysicsModule.dll</HintPath>

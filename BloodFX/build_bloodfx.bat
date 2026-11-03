@@ -11,5 +11,6 @@ where dotnet >> "%LOG%" 2>&1 || set DN="%~dp0..\dotnet10\dotnet.exe"
 if errorlevel 1 (echo BUILD FAILED >> "%LOG%" & exit /b 1)
 if not exist "%DEST%" mkdir "%DEST%"
 copy /y "bin\Release\BloodFX.dll" "%DEST%\BloodFX.dll" >> "%LOG%" 2>&1
+if exist sounds xcopy /y /i /q sounds "%DEST%\sounds\" >> "%LOG%" 2>&1
 if errorlevel 1 (echo DEPLOY FAILED - is the game running? >> "%LOG%" & exit /b 1)
 echo BUILD+DEPLOY OK >> "%LOG%"

@@ -12,12 +12,12 @@ namespace BloodFX;
 /// <summary>
 /// Head dismemberment, in two kinds. Whole: the posed head is baked and broken into jagged shards
 /// that keep the character's own skin texture (with a raw underside), the head bone is collapsed,
-/// and a ragged neck stump with no skull is grown in its place from a distance field. Half: only the
-/// exit side is blown away; the entry side stays on as a baked copy riding the head bone, and the
-/// open wound is filled with a cross-section grown the same way (skull rim, brain, torn meat) so the
-/// hollow skin is never seen through. Either way whatever is worn on the head (helmet, mask, glasses,
-/// headset) is knocked off and flies as a rigid piece. Purely visual: gear, loot and hit zones are
-/// untouched.
+/// and a ragged neck stump with no skull is grown in its place from a distance field. Face: one side
+/// of the face, brow to chin, is torn out; the rest of the head stays on as a baked copy riding the
+/// head bone, and the hole is filled with a wound grown the same way (eye socket, cheekbone, both jaws
+/// with teeth, tongue, torn meat, peeled skin flaps) so the hollow skin is never seen through. Either
+/// way whatever is worn on the head (helmet, mask, glasses, headset) is knocked off and flies as a
+/// rigid piece. Purely visual: gear, loot and hit zones are untouched.
 /// </summary>
 internal sealed class HeadGib
 {
@@ -51,7 +51,7 @@ internal sealed class HeadGib
     private const float CollapsedScale = 0.001f, FadeTime = 4f;
     private static readonly Color Meat = new Color(0.4f, 0.035f, 0.03f), Fat = new Color(0.62f, 0.46f, 0.34f),
         BoneCol = new Color(0.7f, 0.63f, 0.52f), Hole = new Color(0.1f, 0.006f, 0.006f), Inner = new Color(0.3f, 0.015f, 0.012f),
-        Brain = new Color(0.5f, 0.27f, 0.25f);
+        Ivory = new Color(0.84f, 0.78f, 0.64f), Tongue = new Color(0.42f, 0.13f, 0.14f);
     private static readonly Vector3 KeyLight = new Vector3(-0.35f, 0.85f, 0.4f).normalized;
 
     private readonly Transform _root;
@@ -81,9 +81,9 @@ internal sealed class HeadGib
 
     public bool IsDone(Player p) => p != null && _done.Contains(p.GetInstanceID());
 
-    /// <summary>Destroys the head, wholly or the exit half. Returns false (and changes nothing) if the bones can't be found.</summary>
-    /// <param name="half">Keep the entry side of the face instead of taking the whole head.</param>
-    /// <param name="wound">Where the blood comes out (neck cut, or the open side of the head), world.</param>
+    /// <summary>Destroys the head, wholly or one side of the face. Returns false (and changes nothing) if the bones can't be found.</summary>
+    /// <param name="half">Tear out one side of the face instead of taking the whole head.</param>
+    /// <param name="wound">Where the blood comes out (neck cut, or the torn face), world.</param>
     /// <param name="bleedDir">Which way the wound faces, world.</param>
     /// <param name="anchor">Bone the wound rides on (neck, or the head itself).</param>
     public bool Dismember(Player victim, Vector3 dir, ref bool half, float light, float life, float now,
@@ -127,19 +127,18 @@ internal sealed class HeadGib
         }
         else
         {
-            // a ragged line across the head, square to the shot: the exit side goes, the entry side stays
+            // one side of the face, brow to chin, is torn out (the right, or the left when the round went that way)
             float seed = Random.value * 100f;
-            Vector3 sdir = dir.normalized;
-            float Side(Vector3 p) => Vector3.Dot(p - centre, sdir) - 0.016f * SurfaceNets.Noise(p * 28f, seed);
+            Face face = FaceFrame(victim, head, centre, up, dir);
             var kept = new List<Tri>();
             var lost = new List<Tri>();
-            foreach (Tri t in tris) (Side((t.A + t.B + t.C) / 3f) < 0f ? kept : lost).Add(t);
+            foreach (Tri t in tris) (FaceRegion(face.Local((t.A + t.B + t.C) / 3f), seed) < 0f ? lost : kept).Add(t);
             Shatter(lost, centre, dir, up, light, life, now);
-            // the entry side stays on the body, riding the (collapsed) head bone at full size
-            AddKeptHalf(head, kept, cut);
-            AddSkullCap(head, centre, up, sdir, seed, light, cut);
-            wound = centre + sdir * 0.03f;
-            bleedDir = (sdir + Vector3.down * 0.3f).normalized;
+            // the rest of the head stays on the body, riding the (collapsed) head bone at full size
+            AddKeptFace(head, kept, cut);
+            AddFaceWound(head, face, seed, light, cut);
+            wound = face.World(new Vector3(0.045f, -0.03f, 0.05f));
+            bleedDir = (face.Right * 0.6f + face.Fwd * 0.5f + Vector3.down * 0.5f).normalized;
             anchor = head;
         }
         _cuts.Add(cut);
@@ -406,12 +405,12 @@ internal sealed class HeadGib
         return mesh;
     }
 
-    /// <summary>The entry side of the face stays on, as a baked copy riding the head bone.</summary>
-    private void AddKeptHalf(Transform head, List<Tri> kept, Cut cut)
+    /// <summary>What's left of the head stays on, as a baked copy riding the head bone.</summary>
+    private void AddKeptFace(Transform head, List<Tri> kept, Cut cut)
     {
         if (kept.Count == 0) return;
         Mesh mesh = SkinMesh(kept, head.position, head.rotation, 1f, out Material[] mats);
-        var go = new GameObject("BloodFX_HalfFace");
+        var go = new GameObject("BloodFX_KeptFace");
         go.transform.SetParent(head, false);
         go.transform.localPosition = Vector3.zero;
         go.transform.localRotation = Quaternion.identity;
@@ -451,67 +450,211 @@ internal sealed class HeadGib
     private readonly List<Job> _jobs = new List<Job>();
     private static bool _jobErrorLogged;
 
-    /// <summary>The open side of a half-destroyed head: skull rim, brain and torn meat filling the inside of what's left.</summary>
-    private void AddSkullCap(Transform head, Vector3 centre, Vector3 up, Vector3 sdir, float seed, float light, Cut cut)
+    /// <summary>
+    /// The face's own frame, world space: origin at the skull centre, x toward the wounded side of
+    /// the face, y up the head, z out of the face. The wound is designed in these coordinates.
+    /// </summary>
+    private struct Face
+    {
+        public Vector3 Centre, Right, Up, Fwd;
+        public bool Mirrored;
+        public Vector3 Local(Vector3 w) { Vector3 d = w - Centre; return new Vector3(Vector3.Dot(d, Right), Vector3.Dot(d, Up), Vector3.Dot(d, Fwd)); }
+        public Vector3 World(Vector3 l) => Centre + WorldDir(l);
+        public Vector3 WorldDir(Vector3 l) => Right * l.x + Up * l.y + Fwd * l.z;
+    }
+
+    private static Face FaceFrame(Player victim, Transform head, Vector3 centre, Vector3 up, Vector3 dir)
+    {
+        Vector3 look = Vector3.zero;
+        try { look = victim.LookDirection; } catch { }
+        Vector3 fwd = Vector3.ProjectOnPlane(look, up);
+        if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.ProjectOnPlane(head.forward, up);
+        if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.ProjectOnPlane(Vector3.forward, up);
+        fwd.Normalize();
+        // the head bone's axes follow no convention; the one pointing most along the look is where the face is
+        float bd = 0.5f;
+        foreach (Vector3 ax in new[] { head.forward, -head.forward, head.right, -head.right, head.up, -head.up })
+        {
+            Vector3 a = Vector3.ProjectOnPlane(ax, up);
+            if (a.sqrMagnitude < 1e-4f) continue;
+            a.Normalize();
+            float d = Vector3.Dot(a, fwd);
+            if (d > bd) { bd = d; fwd = a; }
+        }
+        Vector3 right = Vector3.Cross(up, fwd).normalized;
+        bool mirrored = Vector3.Dot(dir, right) < -0.3f; // the round came out the left side
+        if (mirrored) right = -right;
+        return new Face { Centre = centre, Right = right, Up = up, Fwd = fwd, Mirrored = mirrored };
+    }
+
+    /// <summary>Negative where the face is torn out: one cheek, eye and jaw, front of the head, brow to chin, ragged edge.</summary>
+    private static float FaceRegion(Vector3 p, float seed)
+    {
+        return SurfaceNets.RoundBox(p, new Vector3(0.042f, -0.03f, 0.058f), new Vector3(0.04f, 0.05f, 0.05f), 0.012f)
+               - 0.012f * SurfaceNets.Noise(p * 32f, seed);
+    }
+
+    /// <summary>
+    /// The wound where the face was: the skull under it with the eye socket, cheekbone and both jaws showing,
+    /// rows of teeth (a few knocked out, a few loose in the meat), the tongue behind the lower teeth, raw
+    /// meat and clotted pockets over the rest, peeled skin flaps along the rim and a wet lip over the join
+    /// with the skin that's left. Solid, so the hollow head is never seen through it.
+    /// </summary>
+    private void AddFaceWound(Transform head, Face face, float seed, float light, Cut cut)
     {
         // everything random or from Unity is taken here; the worker only does arithmetic
-        Vector3 fwd = Vector3.ProjectOnPlane(head.forward, up);
-        if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.ProjectOnPlane(Vector3.forward, up);
-        Quaternion hrInv = Quaternion.Inverse(Quaternion.LookRotation(fwd.normalized, up));
-        Vector3 skull = centre - fwd.normalized * 0.008f;
+        Vector3 skull = new Vector3(0f, 0f, -0.008f);
         var radii = new Vector3(0.066f, 0.084f, 0.08f);
-        var lumps = new List<(Vector3 c, float r)>();
-        Vector3 t1 = Vector3.Cross(sdir, up);
-        if (t1.sqrMagnitude < 1e-4f) t1 = Vector3.Cross(sdir, fwd);
-        t1.Normalize();
-        Vector3 t2 = Vector3.Cross(sdir, t1);
-        for (int i = 0; i < 7; i++)
+        Quaternion none = Quaternion.identity;
+        // z of the skull surface at (x, y), used to sit things on it
+        float Surface(float x, float y)
         {
-            Vector2 o = Random.insideUnitCircle * 0.05f;
-            lumps.Add((skull + t1 * o.x + t2 * o.y - sdir * 0.004f, Random.Range(0.008f, 0.016f)));
+            float k = 1f - (x * x) / (radii.x * radii.x) - (y * y) / (radii.y * radii.y);
+            return skull.z + radii.z * Mathf.Sqrt(Mathf.Max(0.05f, k));
         }
+        var lumps = new List<(Vector3 c, float r)>();
+        for (int i = 0; i < 9; i++)
+        {
+            float x = Random.Range(0.012f, 0.078f), y = Random.Range(-0.085f, 0.022f);
+            lumps.Add((new Vector3(x, y, Surface(x, y) - 0.003f), Random.Range(0.007f, 0.013f)));
+        }
+        // teeth along the two jaw arcs, hanging from the upper jaw and standing on the lower
+        var teeth = new List<(Vector3 c, Quaternion inv, Vector3 r)>();
+        for (int row = 0; row < 2; row++)
+        {
+            float y = row == 0 ? -0.0485f : -0.0595f;
+            for (int i = 0; i < 7; i++)
+            {
+                if (Random.value < 0.2f) continue; // knocked out
+                float a = (-12f + i * 16f + (row == 0 ? 0f : 8f)) * Mathf.Deg2Rad;
+                var c = new Vector3(0.046f * Mathf.Sin(a), y, 0.022f + 0.046f * Mathf.Cos(a));
+                float tilt = Random.value < 0.25f ? 35f : 12f;
+                Quaternion q = Quaternion.Euler(Random.Range(-tilt, tilt), a * Mathf.Rad2Deg, Random.Range(-tilt, tilt));
+                teeth.Add((c, Quaternion.Inverse(q), new Vector3(0.0035f, 0.0055f, 0.003f)));
+            }
+        }
+        for (int i = 0; i < 3; i++) // loose, lying in the meat
+        {
+            float x = Random.Range(0.015f, 0.07f), y = Random.Range(-0.085f, -0.01f);
+            teeth.Add((new Vector3(x, y, Surface(x, y) + 0.002f), Quaternion.Inverse(Random.rotation), new Vector3(0.0035f, 0.0055f, 0.003f)));
+        }
+        var shards = new List<(Vector3 c, Quaternion inv, Vector3 r)>(); // slivers of bone in the meat
+        for (int i = 0; i < 4; i++)
+        {
+            float x = Random.Range(0.012f, 0.075f), y = Random.Range(-0.08f, 0.02f);
+            shards.Add((new Vector3(x, y, Surface(x, y) + 0.001f), Quaternion.Inverse(Random.rotation), new Vector3(0.009f, 0.005f, 0.002f)));
+        }
+        // skin peeled back along the rim: thin sheets, their z axis the sheet's normal
+        var flaps = new List<(Vector3 c, Quaternion inv, Vector3 r)>
+        {
+            (new Vector3(0.088f, -0.035f, 0.035f), Quaternion.Inverse(Quaternion.LookRotation(new Vector3(1f, 0f, -0.4f))), new Vector3(0.012f, 0.03f, 0.0035f)),
+            (new Vector3(0.03f, -0.098f, 0.05f), Quaternion.Inverse(Quaternion.LookRotation(new Vector3(0f, -0.4f, 1f))), new Vector3(0.026f, 0.016f, 0.0035f)),
+            (new Vector3(-0.012f, -0.04f, 0.074f), Quaternion.Inverse(Quaternion.LookRotation(new Vector3(-0.3f, 0f, 1f))), new Vector3(0.012f, 0.03f, 0.0035f)),
+            (new Vector3(0.04f, 0.034f, 0.06f), Quaternion.Inverse(Quaternion.LookRotation(new Vector3(0f, 0.5f, 1f))), new Vector3(0.03f, 0.01f, 0.0035f)),
+        };
+        Vector3 socket = new Vector3(0.03f, 0.005f, 0.052f), nose = new Vector3(0.006f, -0.02f, 0.07f);
+        Vector3 cheek = new Vector3(0.045f, -0.012f, 0.045f), cheekR = new Vector3(0.022f, 0.008f, 0.02f);
+        Vector3 mouth = new Vector3(0.02f, -0.053f, 0.045f), mouthR = new Vector3(0.07f, 0.009f, 0.05f);
+        Vector3 tongue = new Vector3(0f, -0.058f, 0.03f), tongueR = new Vector3(0.02f, 0.0055f, 0.03f);
+        Quaternion tongueInv = Quaternion.Inverse(Quaternion.Euler(-12f, 0f, 0f));
+        Vector3 lightLocal = face.Local(face.Centre + KeyLight);
+        bool mirrored = face.Mirrored;
         Vector3 headPos = head.position;
         Quaternion headInv = Quaternion.Inverse(head.rotation);
 
         Grown Work()
         {
-            float Side(Vector3 p) => Vector3.Dot(p - centre, sdir) - 0.016f * SurfaceNets.Noise(p * 28f, seed);
-            float Shell(Vector3 p) => SurfaceNets.Ellipsoid(p, skull, hrInv, radii);
+            float Region(Vector3 p) => FaceRegion(p, seed);
+            float Shell(Vector3 p) => SurfaceNets.Ellipsoid(p, skull, none, radii);
+            float Jaw(Vector3 p, float y, float r)
+            {
+                // a bar of bone along the tooth arc
+                float d = float.MaxValue;
+                for (int i = 0; i <= 7; i++)
+                {
+                    float a = (-20f + i * 17f) * Mathf.Deg2Rad;
+                    d = Mathf.Min(d, SurfaceNets.Sphere(p, new Vector3(0.046f * Mathf.Sin(a), y, 0.022f + 0.046f * Mathf.Cos(a)), r));
+                }
+                return d;
+            }
+            float Teeth(Vector3 p)
+            {
+                float d = float.MaxValue;
+                foreach (var t in teeth) d = Mathf.Min(d, SurfaceNets.Ellipsoid(p, t.c, t.inv, t.r));
+                return d;
+            }
+            float Shards(Vector3 p)
+            {
+                float d = float.MaxValue;
+                foreach (var s in shards) d = Mathf.Min(d, SurfaceNets.Ellipsoid(p, s.c, s.inv, s.r));
+                return d;
+            }
+            float Flaps(Vector3 p)
+            {
+                float d = float.MaxValue;
+                foreach (var f in flaps) d = Mathf.Min(d, SurfaceNets.Ellipsoid(p, f.c, f.inv, f.r));
+                return d;
+            }
+            float Pockets(Vector3 p) => Mathf.Min(SurfaceNets.Sphere(p, socket, 0.017f), SurfaceNets.Sphere(p, nose, 0.011f));
+            float Mouth(Vector3 p) => SurfaceNets.RoundBox(p, mouth, mouthR, 0.003f);
+            float TongueD(Vector3 p) => SurfaceNets.Ellipsoid(p, tongue, tongueInv, tongueR);
+            // the join with the skin: a band just outside the skull, either side of the ragged rim
+            float Lip(Vector3 p) => Mathf.Max(Mathf.Abs(Region(p)) - 0.005f, Mathf.Abs(Shell(p) - 0.009f) - 0.004f);
             float Sdf(Vector3 p)
             {
-                float d = Mathf.Max(Shell(p), Side(p) + 0.003f);
-                foreach (var l in lumps) d = SurfaceNets.SmoothMin(d, Mathf.Max(SurfaceNets.Sphere(p, l.c, l.r), Shell(p)), 0.006f);
-                return d + 0.002f * SurfaceNets.Noise(p * 150f, seed + 5f);
+                float d = Shell(p);                                                              // solid skull filling the hole
+                foreach (var l in lumps) d = SurfaceNets.SmoothMin(d, SurfaceNets.Sphere(p, l.c, l.r), 0.006f);
+                d = SurfaceNets.SmoothMin(d, SurfaceNets.Ellipsoid(p, cheek, none, cheekR), 0.005f);
+                d = SurfaceNets.SmoothMin(d, Jaw(p, -0.04f, 0.01f), 0.005f);
+                d = SurfaceNets.SmoothMin(d, Jaw(p, -0.066f, 0.011f), 0.005f);
+                d = Mathf.Max(d, -Pockets(p));                                                   // eye socket, nasal cavity
+                d = Mathf.Max(d, -Mouth(p));                                                     // the mouth, between the jaws
+                d = Mathf.Min(d, Teeth(p));
+                d = Mathf.Min(d, Shards(p));
+                d = SurfaceNets.SmoothMin(d, TongueD(p), 0.003f);
+                d = Mathf.Max(d, Region(p) + 0.002f);                                            // only inside the torn-out area
+                d = Mathf.Min(d, Flaps(p));
+                d = Mathf.Min(d, Lip(p));
+                return d + 0.0015f * SurfaceNets.Noise(p * 160f, seed + 5f);                     // raw, uneven surface
             }
             var g = new Grown();
-            SurfaceNets.Build(Sdf, skull - Vector3.one * 0.11f, 0.005f, new Vector3Int(45, 45, 45), g.V, g.N, g.T);
+            SurfaceNets.Build(Sdf, new Vector3(-0.03f, -0.12f, -0.015f), 0.0035f, new Vector3Int(40, 50, 40), g.V, g.N, g.T);
             g.C = new Color32[g.V.Count];
-            Vector3 half = (KeyLight + Vector3.up).normalized;
+            Vector3 half = (lightLocal + Vector3.up).normalized;
             for (int i = 0; i < g.V.Count; i++)
             {
                 Vector3 p = g.V[i], n = g.N[i];
                 Color c;
-                if (Shell(p) > -0.007f) c = BoneCol;               // the broken edge of the skull
+                float m = SurfaceNets.Noise(p * 110f, seed + 9f);
+                if (Teeth(p) < 0.0015f) c = Ivory * (0.9f + 0.15f * m);
+                else if (TongueD(p) < 0.0015f) c = Tongue * (0.9f + 0.2f * m);
+                else if (Lip(p) < 0.0015f) c = m > 0.3f ? Inner : Hole;
+                else if (Flaps(p) < 0.0015f) c = m > 0.25f ? Color.Lerp(Inner, Fat, (m - 0.25f) * 1.2f) : Inner * (0.85f + 0.3f * m);
+                else if (Pockets(p) < 0.002f || Mouth(p) < 0.002f) c = m > 0.5f ? Inner : Hole;
+                else if (Shards(p) < 0.0015f || Jaw(p, -0.04f, 0.01f) < 0.002f || Jaw(p, -0.066f, 0.011f) < 0.002f
+                         || SurfaceNets.Ellipsoid(p, cheek, none, cheekR) < 0.002f) c = BoneCol * (0.9f + 0.15f * m);
+                else if (Shell(p) > -0.006f && SurfaceNets.Noise(p * 60f, seed + 2f) > 0.35f) c = BoneCol; // bone through the meat
                 else
                 {
-                    float m = SurfaceNets.Noise(p * 110f, seed + 9f);
-                    c = m > 0.3f ? Color.Lerp(Brain, Meat, (m - 0.3f) * 1.6f) : Brain * (0.85f + 0.3f * m);
-                    if (m < -0.45f) c = Hole;                       // dark clotted pockets
+                    c = m > 0f ? Meat * (0.85f + 0.3f * m) : Color.Lerp(Inner, Meat, 1f + m);
+                    if (m < -0.5f) c = Hole;                                                     // dark clotted pockets
                 }
-                float diff = 0.4f + 0.6f * Mathf.Max(0f, Vector3.Dot(n, KeyLight));
+                float diff = 0.4f + 0.6f * Mathf.Max(0f, Vector3.Dot(n, lightLocal));
                 float spec = Mathf.Pow(Mathf.Max(0f, Vector3.Dot(n, half)), 20f) * 0.6f;
                 g.C[i] = Wet.Shade(c * light, diff, spec);
-                // into the head bone's frame so it rides the ragdoll with the kept half
-                g.V[i] = headInv * (p - headPos);
-                g.N[i] = headInv * n;
+                // into the head bone's frame so it rides the ragdoll with the rest of the head
+                g.V[i] = headInv * (face.World(p) - headPos);
+                g.N[i] = headInv * face.WorldDir(n);
             }
+            // a mirrored frame turns the triangles inside out
+            if (mirrored) for (int i = 0; i + 2 < g.T.Count; i += 3) (g.T[i + 1], g.T[i + 2]) = (g.T[i + 2], g.T[i + 1]);
             return g;
         }
 
         Queue(Work, g =>
         {
             if (cut.Released || head == null) return;
-            GameObject go = MeshObject("BloodFX_SkullCap", g, cut);
+            GameObject go = MeshObject("BloodFX_FaceWound", g, cut);
             go.transform.SetParent(head, false);
             go.transform.localScale = Unscale(head);
         });

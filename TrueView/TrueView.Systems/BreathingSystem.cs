@@ -65,7 +65,9 @@ internal static class BreathingSystem
     private static float _lastTick;
 
     private static float _phase;
-    private static float _adrenaline; // smoothed: fast attack, slow recovery
+    private static float _adrenaline; // hit adrenaline, smoothed: fast attack, slow recovery
+    private static float _stress;     // all adrenaline (being shot at), smoothed
+    private static float _calmTail;
     private static float _exertion;
     private static float _lastStamina = -1f;
     private static float _staminaRate;
@@ -95,8 +97,11 @@ internal static class BreathingSystem
     /// <summary>Heart rate multiplier: the heart quickens slightly while inhaling.</summary>
     public static float HeartRateMod => 1f + 0.05f * Mathf.Max(0f, Mathf.Sin(_phase));
 
+    /// <summary>1 when a hit's calm-down starts, falling to 0 as it ends; 0 outside one.</summary>
+    public static float CalmTail => _calmTail;
+
     /// <summary>Heartbeat volume multiplier: heavy breathing covers the heart a little.</summary>
-    public static float HeartMask => 1f - 0.25f * Mathf.Max(DeepFast.Volume, Running.Volume);
+    public static float HeartMask => 1f - 0.15f * Mathf.Max(DeepFast.Volume, Running.Volume);
 
     public static void Tick(Player player, float dt)
     {
@@ -126,14 +131,20 @@ internal static class BreathingSystem
         // Adrenaline: follow spikes at once, recover with a lag on top of
         // the adrenaline drain so you hear yourself settle down after it.
         // The bigger the episode so far, the slower the heavy breathing settles.
-        float level = AdrenalineSystem.Level;
+        // Only a hit makes you breathe hard; being shot at (near misses,
+        // nearby gunfire) only brings on quiet nose breathing, below.
+        float level = AdrenalineSystem.HitLevel;
         float settle = 3f / Mathf.Max(1f, HandlingConfig.AdrenalineDecay?.Value ?? 8f) / Mathf.Lerp(1f, 1.8f, Intensity);
         float adrRate = level > _adrenaline ? 12f : settle;
         _adrenaline = Mathf.Lerp(_adrenaline, level, 1f - Mathf.Exp(-adrRate * dt));
         float adr = Mathf.Pow(Mathf.Clamp01((_adrenaline - 0.08f) / 0.92f), 1.2f);
+        float stressLevel = AdrenalineSystem.Level;
+        float stressRate = stressLevel > _stress ? 4f : settle;
+        _stress = Mathf.Lerp(_stress, stressLevel, 1f - Mathf.Exp(-stressRate * dt));
 
         // --- Adrenaline episode: trigger -> heavy -> calm-down -> normal ---
-        bool calmOn = HandlingConfig.CalmDownEnabled?.Value != false;
+        // Always on; its volume at 0 is the off switch.
+        bool calmOn = (HandlingConfig.CalmDownVolume?.Value ?? 0.6f) > 0f;
         float jump = level - _lastLevel;
         _lastLevel = level;
         if (alive && jump > 0.04f)
@@ -178,9 +189,12 @@ internal static class BreathingSystem
         }
         if (!_heavy && _calmTotal <= 0f && adr < 0.05f) _load = _peak = 0f;
         float calmPace = calm * Mathf.Lerp(0.5f, 1f, _calmIntensity);
+        _calmTail = calm;
+        float stressPace = Mathf.SmoothStep(0f, 1f, (_stress - 0.03f) / 0.6f);
+        float pace = Mathf.Max(calmPace, stressPace * 0.8f);
 
-        float rate = Mathf.Max(Mathf.Max(Mathf.Lerp(0.2f, 0.52f, exertionGain), Mathf.Lerp(0.2f, 0.62f, _adrenaline)), Mathf.Lerp(0.2f, 0.42f, calmPace));
-        Depth = Mathf.Max(exertionGain, Mathf.Max(_adrenaline * 0.85f, calmPace * 0.4f));
+        float rate = Mathf.Max(Mathf.Max(Mathf.Lerp(0.2f, 0.52f, exertionGain), Mathf.Lerp(0.2f, 0.62f, _adrenaline)), Mathf.Lerp(0.2f, 0.42f, pace));
+        Depth = Mathf.Max(exertionGain, Mathf.Max(_adrenaline * 0.85f, pace * 0.4f));
         if (!HandlingState.IsHoldingBreath)
         {
             _phase += Mathf.PI * 2f * rate * dt;
@@ -199,13 +213,15 @@ internal static class BreathingSystem
         float deepVol = Mathf.Max(low, Mathf.Max(adr, _kick));
         float noseVol = 1f - Mathf.SmoothStep(0f, 1f, (stamina - 0.5f) / 0.35f);
         float calmVol = _calmVolume * Mathf.Pow(calm, 0.8f);
+        // Shot at: light nose breathing, quieter than a hit's calm-down.
+        float stressVol = (HandlingConfig.CalmDownVolume?.Value ?? 0.6f) * 0.5f * stressPace;
 
         State want = State.None;
         if (!alive || HandlingState.IsHoldingBreath) want = State.None;
         else if (sprinting) want = State.Run;
         // Hysteresis around 50% so deep fast and nose do not flip back and forth.
         else if (heavy || stamina < (_state == State.Deep ? 0.5f : 0.45f)) want = State.Deep;
-        else if (calm > 0f) want = State.CalmNose;
+        else if (calm > 0f || stressVol > 0.02f) want = State.CalmNose;
         else if (recovering && stamina < 0.85f) want = State.Nose;
 
         // A new state has to hold for a moment before it takes over (sprint
@@ -224,9 +240,9 @@ internal static class BreathingSystem
         float run = _state == State.Run ? runVol : 0f;
         float deep = _state == State.Deep ? deepVol : 0f;
         float nose = _state == State.Nose ? noseVol
-            : _state == State.CalmNose ? Mathf.Max(calmVol, recovering && stamina < 0.85f ? noseVol : 0f) : 0f;
+            : _state == State.CalmNose ? Mathf.Max(Mathf.Max(calmVol, stressVol), recovering && stamina < 0.85f ? noseVol : 0f) : 0f;
         // The calm-down nose loop plays a little quick at first and slows as you settle.
-        float pitch = _state == State.CalmNose ? Mathf.Lerp(0.95f, 1.06f, calmPace) : 1f;
+        float pitch = _state == State.CalmNose ? Mathf.Lerp(0.95f, 1.06f, pace) : 1f;
         Nose.Pitch = Mathf.MoveTowards(Nose.Pitch, pitch, dt * 0.1f);
 
         if (master <= 0f || !alive)
@@ -484,6 +500,8 @@ internal static class BreathingSystem
     public static void Reset()
     {
         _adrenaline = 0f;
+        _stress = 0f;
+        _calmTail = 0f;
         _exertion = 0f;
         _lastStamina = -1f;
         _staminaRate = 0f;

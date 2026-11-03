@@ -33,7 +33,7 @@ internal static class TurnRollSystem
 
 	public static void Tick(Player player, float deltaTime)
 	{
-		if (deltaTime <= 0f || HandlingConfig.TurnRoll == null)
+		if (deltaTime <= 0f)
 		{
 			return;
 		}
@@ -50,7 +50,7 @@ internal static class TurnRollSystem
 		if (on)
 		{
 			float turn = Mathf.Clamp(MotionTracker.YawRateSlow / 150f, -1.5f, 1.5f);
-			target = turn * HandlingConfig.TurnRoll.Value;
+			target = turn * 6f * HandlingConfig.TurnRollScale;
 			if (HandlingState.IsAiming)
 			{
 				target *= 0.35f;

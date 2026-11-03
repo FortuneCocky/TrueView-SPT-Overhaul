@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace TacticalStances;
 
-[BepInPlugin("com.devin.tacticalstances", "Tactical Stances", "1.2.0")]
+[BepInPlugin("com.devin.tacticalstances", "Tactical Stances", "1.3.0")]
 public class TacticalStancesPlugin : BaseUnityPlugin
 {
     public static ManualLogSource Log;

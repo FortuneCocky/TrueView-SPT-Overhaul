@@ -8,18 +8,19 @@ namespace BloodFX;
 /// rounded meniscus edge that oozes outward over time. The outline is lobed and
 /// each lobe advances at its own pace, so the pool creeps out in tongues rather
 /// than growing as a circle. Every spoke is clamped by raycasts to where there is
-/// ground, so a pool stops at a ledge instead of hanging over it. Shading (dark
-/// body, wet highlight that moves with the viewer) is baked into vertex colours;
-/// all pools share one mesh and one draw call.
+/// ground, so a pool stops at a ledge instead of hanging over it. A pool can be fed
+/// while it lives (a rope of blood landing on it): the fluid raises its target size
+/// and the puddle creeps out after it. Shading (dark body, wet highlight that moves
+/// with the viewer) is baked into vertex colours; all pools share one mesh and one draw call.
 /// </summary>
 internal sealed class BloodPools
 {
     private struct Pool
     {
         public Vector3 Pos, N, T1, T2;
-        public float Radius, H, Start, Grow, Life;
+        public float Radius, Target, Shown, MaxR, H, Start, Last, Grow, Life;
         public Color Col;
-        public int Seed;
+        public int Seed, Serial;
         public bool Live;
     }
 
@@ -35,10 +36,10 @@ internal sealed class BloodPools
     private readonly MeshRenderer _renderer;
     private readonly int _mask;
     private Pool[] _p;
-    private float[] _reach, _lag;
+    private float[] _reach, _lobe, _lag;
     private Vector3[] _v;
     private Color32[] _c;
-    private int _next, _live;
+    private int _next, _live, _serial;
     private readonly float[] _r = new float[Seg], _r2 = new float[Seg];
     private float _nextTick;
 
@@ -77,6 +78,7 @@ internal sealed class BloodPools
         capacity = Mathf.Clamp(capacity, 4, 128);
         _p = new Pool[capacity];
         _reach = new float[capacity * Seg];
+        _lobe = new float[capacity * Seg];
         _lag = new float[capacity * Seg];
         _v = new Vector3[capacity * Per];
         _c = new Color32[capacity * Per];
@@ -124,7 +126,15 @@ internal sealed class BloodPools
     /// <param name="start">When blood first reaches the ground (may be in the future).</param>
     /// <param name="grow">Seconds to ooze out to full size.</param>
     /// <param name="lobing">How irregular the outline is: 1 = spreading pool with tongues, small = a near-round bead.</param>
-    public void Add(Vector3 pos, Vector3 normal, float radius, Color col, float start, float grow, float life, float lobing = 1f)
+    public int Add(Vector3 pos, Vector3 normal, float radius, Color col, float start, float grow, float life, float lobing = 1f)
+    {
+        return Add(pos, normal, radius, col, start, grow, life, lobing, radius, out _);
+    }
+
+    /// <param name="maxRadius">How far the pool may ever be fed out to; the ground is walked out to there once.</param>
+    /// <param name="serial">Identifies this pool in the returned slot, for <see cref="Feed"/>.</param>
+    public int Add(Vector3 pos, Vector3 normal, float radius, Color col, float start, float grow, float life, float lobing,
+        float maxRadius, out int serial)
     {
         int i = _next;
         _next = (_next + 1) % _p.Length;
@@ -135,20 +145,25 @@ internal sealed class BloodPools
         p.T1 = Vector3.Cross(normal, Mathf.Abs(normal.y) < 0.9f ? Vector3.up : Vector3.right).normalized;
         p.T2 = Vector3.Cross(normal, p.T1);
         p.Radius = radius;
-        // thick enough to read as liquid; small pools are thinner, every pool a little different
-        p.H = Mathf.Lerp(0.003f, 0.008f, Mathf.Clamp01(radius / 0.6f)) * Random.Range(0.8f, 1.2f);
+        p.Target = radius;
+        p.Shown = radius * 0.12f;
+        p.MaxR = Mathf.Max(radius, maxRadius);
+        p.H = Depth(radius);
         p.Start = start;
+        p.Last = start;
         p.Grow = Mathf.Max(0.2f, grow);
         p.Life = life;
         p.Col = col;
         p.Seed = Random.Range(0, 100000);
+        p.Serial = ++_serial;
         p.Live = true;
+        serial = p.Serial;
 
         // lobed outline: smooth noise plus two or three tongues that run farther
         int tongues = Random.Range(2, 4);
         float a0 = Random.value * 6.283f, a1 = Random.value * 6.283f, a2 = Random.value * 6.283f;
         float off = Random.value * 50f;
-        int rays = radius > 0.3f ? 4 : 2;
+        int rays = p.MaxR > 0.3f ? 4 : 2;
         for (int j = 0; j < Seg; j++)
         {
             float ang = j * 6.283f / Seg;
@@ -156,7 +171,8 @@ internal sealed class BloodPools
                 + 0.12f * Noise(Cos[j] * 4f + off * 2f, Sin[j] * 4f);
             lobe += 0.45f * Bump(ang, a0, 0.6f) + 0.3f * Bump(ang, a1, 0.5f) + (tongues > 2 ? 0.25f * Bump(ang, a2, 0.45f) : 0f);
             lobe = 1f + (lobe - 1f) * lobing;
-            float reach = radius * lobe;
+            _lobe[i * Seg + j] = lobe;
+            float reach = p.MaxR * lobe;
             Vector3 dir = p.T1 * Cos[j] + p.T2 * Sin[j];
             // stop at the last bit of ground that's level with the pool
             float ok = 0.15f;
@@ -173,11 +189,35 @@ internal sealed class BloodPools
             _lag[i * Seg + j] = Mathf.Clamp01(0.08f * Noise(Cos[j] * 1.5f + off * 3f, Sin[j] * 1.5f) + (lobe - 0.9f) * 0.3f);
         }
         _nextTick = 0f;
+        return i;
+    }
+
+    public bool IsLive(int slot, int serial)
+    {
+        return slot >= 0 && slot < _p.Length && _p[slot].Live && _p[slot].Serial == serial;
+    }
+
+    /// <summary>More blood arriving on a pool: its target grows by that much area and it lives on from now.</summary>
+    public void Feed(int slot, int serial, float area, float now)
+    {
+        if (!IsLive(slot, serial)) return;
+        ref Pool p = ref _p[slot];
+        float r = Mathf.Sqrt(p.Target * p.Target + area / Mathf.PI);
+        p.Target = Mathf.Min(p.MaxR, r);
+        p.H = Mathf.Max(p.H, Depth(p.Target));
+        p.Last = now;
+    }
+
+    private static float Depth(float radius)
+    {
+        // thick enough to read as liquid; small pools are thinner, every pool a little different
+        return Mathf.Lerp(0.003f, 0.008f, Mathf.Clamp01(radius / 0.6f)) * Random.Range(0.8f, 1.2f);
     }
 
     public void Tick(float now, Vector3 eye, bool haveEye)
     {
         if (_live == 0 || now < _nextTick) return;
+        float dt = Mathf.Clamp(now - (_nextTick - TickRate), TickRate, 0.5f);
         _nextTick = now + TickRate;
         Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue), max = -min;
         bool any = false;
@@ -185,7 +225,7 @@ internal sealed class BloodPools
         {
             ref Pool p = ref _p[i];
             if (!p.Live) continue;
-            float left = p.Start + p.Life - now;
+            float left = Mathf.Max(p.Start, p.Last) + p.Life - now;
             if (left <= 0f)
             {
                 p.Live = false;
@@ -198,8 +238,10 @@ internal sealed class BloodPools
                 Collapse(i);
                 continue;
             }
-            Build(i, now, left < FadeTime ? left / FadeTime : 1f, eye, haveEye);
-            float e = p.Radius * 1.6f;
+            // viscous spread: quick at first, then a slow creep up to the target
+            p.Shown = Mathf.Lerp(p.Shown, p.Target, 1f - Mathf.Exp(-dt * 3f / p.Grow));
+            Build(i, left < FadeTime ? left / FadeTime : 1f, eye, haveEye);
+            float e = p.MaxR * 1.6f;
             min = Vector3.Min(min, p.Pos - new Vector3(e, e, e));
             max = Vector3.Max(max, p.Pos + new Vector3(e, e, e));
             any = true;
@@ -215,10 +257,9 @@ internal sealed class BloodPools
         }
     }
 
-    private void Build(int i, float now, float fade, Vector3 eye, bool haveEye)
+    private void Build(int i, float fade, Vector3 eye, bool haveEye)
     {
         ref Pool p = ref _p[i];
-        float age = (now - p.Start) / p.Grow;
         float h = p.H * fade;
         Vector3 basePos = p.Pos + p.N * Lift;
         Vector3 toEye = haveEye ? (eye - p.Pos).normalized : p.N;
@@ -227,12 +268,13 @@ internal sealed class BloodPools
         int v = i * Per;
         _v[v] = basePos + p.N * (h * 1.05f);
         _c[v] = Shade(ref p, p.N, toEye, 1f, gloss, 0.5f);
+        float done = p.Target > 1e-4f ? p.Shown / p.Target : 1f;
         for (int j = 0; j < Seg; j++)
         {
-            float x = Mathf.Clamp01(age * (1f + _lag[i * Seg + j]) - _lag[i * Seg + j]);
-            // viscous spread: quick at first, then a slow creep to full size
-            float grown = 1f - Mathf.Pow(1f - x, 3f);
-            _r[j] = _reach[i * Seg + j] * Mathf.Max(0.12f, grown) * Mathf.Lerp(0.85f, 1f, fade);
+            int jj = i * Seg + j;
+            // tongues lag behind the body and catch up as it settles
+            float lagged = p.Shown * (1f - _lag[jj] * (1f - done));
+            _r[j] = Mathf.Min(_reach[jj], Mathf.Max(0.004f, lagged * _lobe[jj])) * Mathf.Lerp(0.85f, 1f, fade);
         }
         // surface tension keeps the rim smooth: relax each spoke toward its neighbours
         for (int pass = 0; pass < 2; pass++)

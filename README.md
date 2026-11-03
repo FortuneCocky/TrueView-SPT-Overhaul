@@ -2,7 +2,7 @@
 
 **One pack that makes Tarkov feel physical.** Your gun has weight and lags behind your aim, your body moves like a person's, your eyes focus like eyes, and every hit bleeds in full 3D.
 
-TrueView bundles client mods that are built to work together:
+TrueView bundles mods that are built to work together:
 
 | Mod | What it does |
 |---|---|
@@ -11,6 +11,7 @@ TrueView bundles client mods that are built to work together:
 | **Dynamic DoF** | Eye-like depth of field that focuses on whatever you look at |
 | **BloodFX** | Fully volumetric blood: spurts, drips, trails, pools, wounds, armor impacts and head dismemberment |
 | **Euphoria Reactions** | Physics-driven hit reactions: bots stagger, catch themselves, buckle, fall and get back up |
+| **HardcoreDMG** | A deadlier damage model: anatomical torso zones, reworked body HP, bullet physics, shotguns, wound reactions (server + client, optional) |
 
 Each one has its own config file. Turn any of them off or tune it however you like.
 
@@ -30,6 +31,8 @@ Your weapon stops being glued to the centre of the screen.
 - **Hand kick.** In hip fire, each shot kicks the gun up and back around your grip, and it settles in about a tenth of a second.
 - **One recoil switch.** "Disable TrueView recoil" turns off every recoil effect TrueView adds (shot jolt, hand kick, misalignment) and keeps only the game's own recoil.
 - **Collision-aware ADS.** The gun pulls back near walls instead of clipping through them.
+- **Barrel alignment (optional, off by default).** In hip fire, lines the barrel up with where the deadzone is aiming, so shots go where the gun is pointed on screen, the same on every weapon.
+- **Magnified scopes.** Looking through a 2x or stronger optic hands the gun, view and sway back to the game, so the scope picture stays steady and attached to the lens. At the hip, a mounted scope rides a little lower so it doesn't cover your view.
 
 ## 🏃 TrueView — body and camera
 
@@ -42,7 +45,7 @@ Your weapon stops being glued to the centre of the screen.
 
 ## ❤️ TrueView — stress and injury
 
-- **Adrenaline.** Taking hits or hearing gunfire nearby raises adrenaline. It causes a slight hand tremor, a tunnel-vision pinch and a low heartbeat you can hear, then decays over several seconds.
+- **Adrenaline.** Taking hits or hearing gunfire nearby raises adrenaline. It causes a slight hand tremor and a tunnel-vision pinch, then decays over several seconds. Being shot at brings a soft, slow heartbeat you feel in your chest; getting hit spikes it to a loud, fast one that slows down as you calm.
 - **Near misses.** A round passing close makes you flinch away from the side it passed, harder the closer it came, and raises adrenaline. Custom whiz sounds can replace the game's flyby sound.
 - **Breathing.** You hear and feel breathing that matches your stamina, from calm nose breathing to heavy panting after a sprint. Holding your breath silences it.
 - **Calming down.** After a fight, heavy breathing slowly settles into nose breathing: a short calm-down after a distant shot, a long one after a real firefight. A fresh hit or nearby fire cuts straight back to heavy breathing.
@@ -75,6 +78,7 @@ Carry your weapon like an operator instead of always having it shouldered.
 - **Arm stamina.** Holding a stance drains or restores stamina based on weapon weight. LMGs are heavy, pistols are cheap.
 - **Stance bonuses.** Each stance has its own configurable perks (sprint acceleration, move speed, ADS move speed, recoil).
 - **Your stance is remembered** between raids.
+- **Scope clearance.** When you're not aiming, a big optic that would cover the middle of your screen pushes the gun down until your view is clear, in any stance. Prone, the scope is held against the game's turn-away pull.
 
 ---
 
@@ -96,10 +100,10 @@ Depth of field that behaves like your eyes. It uses the game's own post-processi
 Blood that is actual 3D geometry, not flat sprites. Every drop collides with the world and stays where it lands. It was written from scratch for performance: each effect type is drawn as one shared mesh (a single draw call), with fixed budgets so nothing piles up.
 
 **On the hit**
-- **Exit spurts and ribbons.** Glossy ropes of blood burst from exit wounds, peel off thin strands and break into drops.
+- **Exit spurts and ribbons.** Blood pours from wounds as one continuous rope of liquid that sags, thins, pinches off into beads and peels off side strands. Where it lands it pools, streaks along the floor or runs down the wall.
 - **Headshots** throw forked ribbons sideways across your view, with a dense cloud of drops. Close to a wall, they paint it with layered spatter, a dark core and drips that creep down for seconds.
 - **Brain matter.** Headshots can throw glossy chunks and skull chips that tumble, splat and slide down walls.
-- **Head dismemberment.** A killing headshot can take off half the face or the whole head, leaving a ragged wound or neck stump that pumps and drips. Helmets, masks and glasses fly off as separate pieces. It's visual only: the real items stay on the body.
+- **Head dismemberment.** A killing headshot can tear out one side of the face (eye socket, cheekbone, jaws and teeth) or take the whole head, leaving a ragged wound or neck stump that pumps and drips. Helmets, masks and glasses fly off as separate pieces. It's visual only: the real items stay on the body.
 - **Mist burst.** Every hit puffs a dense dark-red burst that tears into a web of fine strands and droplets within a fraction of a second.
 - **Spray.** Drops in realistic sizes (many tiny, a few heavy) that fall and splatter wherever they hit.
 
@@ -110,6 +114,11 @@ Blood that is actual 3D geometry, not flat sprites. Every drop collides with the
 - **Drips.** Wounds keep forming hanging teardrops that let go and fall. Each one lands as a bead that merges with the ones before it into a growing blob. A bleeding character leaves a trail of real drops instead of the game's flat stains.
 - **Pools.** Bodies leave a thick, glossy pool that oozes out from underneath over half a minute and stops at ledges instead of hanging in the air.
 - **Decals follow surfaces.** Marks bend over steps and bumps, and nothing floats past edges or doorways.
+- **Bloody footprints.** Step in a pool and your boots leave tread prints that fade as they dry, with a wet splash on each bloody step.
+
+**Bodies**
+- **Dead weight.** Corpses carry the weight of their gear, and bullets still move them after death.
+- **Dragging.** Hold interact on a body to drag it. A bleeding body smears blood along the floor behind it, with a quiet scrape.
 
 **On the body**
 - **Bullet wounds** are real size: a dark wet hole with a ragged ring of torn flesh, some with a trickle running down.
@@ -159,25 +168,56 @@ Bots react to being shot with their whole body, driven by a real-time physics si
 - **Bots don't act while reacting.** No shooting (except an aim-back), moving, healing or AI until they've fully recovered.
 - **Fail-safes.** Any bot stuck, wedged or draped too long is put back into the nearest stance.
 - **Smooth at any frame rate.** The physics runs at 60 Hz and the body is interpolated between steps.
+- **Light on performance.** Every reacting bot's physics runs side by side on worker threads, and the map scan around a bot is cast in one batch.
+- **Works with amos's Euphoria Style Physics.** When both are installed, each bot belongs to one mod at a time: living stumbles, balance, falls and get-ups are ours; deaths, corpses, flinch and explosions are its.
 - **Every chance, force and timing is configurable.**
+
+---
+
+## 🩻 HardcoreDMG
+
+A deadlier, more anatomical damage model. It has a server part (body HP) and a client part (how damage lands), and it is optional: the rest of the pack works without it.
+
+**Body**
+- **Reworked HP.** Every bot group is rebuilt from one base body (head 22, chest 115, stomach 105, arms 58, legs 68). Bosses, the Goons, Killa, Tagilla and friends get their own builds on top.
+- **Toughness per tier.** Scale regulars, elites (guards, raiders, rogues, cultists) and bosses separately, and your own HP too.
+
+**Damage**
+- **Anatomical torso zones.** Heart, spine, flanks and pelvis each have their own damage, lethality and bleeding.
+- **Damage scales** for head, chest, stomach, arms and legs, plus heavy and light bleed odds.
+- **Bullet physics.** Fragmentation, penetration, energy lost through armor and ricochets.
+- **Shotgun rework.** Pellets carry real energy: devastating point blank, fading with spread and range, and tighter clusters hit harder. Buckshot and slugs each have their own blunt trauma through armor.
+
+**Wounds**
+- **Falls on leg wounds.** A badly hurt leg can drop a bot to the ground.
+- **Stance lock.** A bot with shattered legs can't get up from crouch or prone until they're healed.
+- **Leg cripple.** Bots with ruined legs crawl.
+- **Optional for you:** the leg effects can apply to you too, and a bad arm wound can make you drop your weapon. Both are off by default.
+
+**Config Editor.** `SPT/user/mods/HardcoreDMG/HardcoreDMG Config Editor.exe` edits the server and client settings in one window, with built-in presets and presets you can share.
 
 ---
 
 ## 📦 Install
 
 1. Download the latest zip from [Releases](https://github.com/FortuneCocky/TrueView-SPT-Overhaul/releases).
-2. Extract it into your **SPT root folder** and merge the `BepInEx` folder.
-3. Launch the game once to generate the configs:
+2. Extract it into your **SPT root folder** (the one with `EscapeFromTarkov.exe`) and merge the `BepInEx` and `SPT` folders. HardcoreDMG's server mod goes to `SPT/user/mods/HardcoreDMG`; if your server folder has another name, put it in that folder's `user/mods`.
+3. Restart the SPT server and launch the game once to generate the configs:
    - `BepInEx/config/com.trueview.cfg`
    - `BepInEx/config/com.devin.tacticalstances.cfg`
    - `BepInEx/config/com.dynamicdof.prism.cfg`
    - `BepInEx/config/com.irl.bloodfx.cfg`
+   - `BepInEx/config/com.euphoria.reaction.cfg`
+   - `BepInEx/config/com.devin.hardcoredmg.client.cfg`
 
-Every setting can also be changed in game through the **BepInEx Configuration Manager (F12)**.
+Every client setting can also be changed in game through the **BepInEx Configuration Manager (F12)**. HardcoreDMG's server settings are in `SPT/user/mods/HardcoreDMG/config.jsonc` or its Config Editor.
+
+To play without HardcoreDMG, delete `SPT/user/mods/HardcoreDMG` and `BepInEx/plugins/HardcoreDMG`.
 
 ## ✅ Compatibility
 
-- **SPT 4.1.x**, client only. No server mod needed.
+- **SPT 4.1.x.** Everything is client only except HardcoreDMG, which also has a server mod.
+- Other damage or health mods (SPT Realism's health system, for example) will likely conflict with HardcoreDMG.
 - All the mods are designed to stack. Tactical Stances layers on top of TrueView's weapon motion, and Dynamic DoF keeps your sights sharp while TrueView moves the gun.
 - **Fontaine's [SPT Stance Overhaul](https://sp-mod.com/mod/3136/spt-stance-overhaul)** works with TrueView (it needs Fontaine's Realism common lib). While you hold one of its stances at hip, TrueView hands the gun to the stance and takes it back when the stance ends; aiming down sights stays TrueView's. Pick either Stance Overhaul or Tactical Stances, not both: two stance mods will fight over the gun.
 - Other weapon-handling or procedural-animation mods will likely conflict with TrueView and Tactical Stances.
@@ -195,6 +235,9 @@ Each mod is its own project in this repo:
 | `DynamicDOF/` | DynamicDOF.dll | `com.dynamicdof.prism.cfg` |
 | `BloodFX/` | BloodFX.dll | `com.irl.bloodfx.cfg` |
 | `EuphoriaReaction/` | EuphoriaReaction.dll | `com.euphoria.reaction.cfg` |
+| `HardcoreDMG/Client/` | HardcoreDMG-Client.dll | `com.devin.hardcoredmg.client.cfg` |
+| `HardcoreDMG/Server/` | HardcoreDMG.dll (server mod) | `config.jsonc` |
+| `HardcoreDMG/ConfigEditor/` | HardcoreDMG Config Editor.exe | |
 
 1. Install the [.NET SDK](https://dotnet.microsoft.com/download) and have an SPT 4.1.x install.
 2. Point the `SPTDir` (or `SPT_INSTALL_DIR`) property in each `.csproj` at your SPT folder. The game and BepInEx assemblies are referenced from there and are not included here.

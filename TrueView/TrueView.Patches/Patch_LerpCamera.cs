@@ -3,6 +3,7 @@ using EFT;
 using EFT.Animations;
 using HarmonyLib;
 using TrueView.Core;
+using TrueView.Systems;
 using SPT.Reflection.Patching;
 using UnityEngine;
 
@@ -57,6 +58,7 @@ internal class Patch_LerpCamera : ModulePatch
             return;
         }
 
+        JitterProbe.VanillaCamera(__instance);
         ApplyCamera(__instance, dt);
         ClampCameraPushback(__instance, player);
     }
@@ -77,7 +79,10 @@ internal class Patch_LerpCamera : ModulePatch
         float fwd = Vector3.Dot(rel, cam.forward);
         const float minForward = 0.02f;
         if (fwd < minForward)
+        {
             cam.position += cam.forward * (minForward - fwd);
+            JitterProbe.Pushback(minForward - fwd, minForward - fwd);
+        }
     }
 
     // TrueView's view replaces the camera rotation vanilla just built, so the

@@ -28,7 +28,7 @@ internal static class InjuryHandlingSystem
 
     public static void Tick(Player player, float deltaTime)
     {
-        if (HandlingConfig.InjuryHandlingEnabled?.Value != true || player?.HealthController is not ActiveHealthController health)
+        if ((HandlingConfig.InjuryHandlingStrength?.Value ?? 1f) <= 0.001f || player?.HealthController is not ActiveHealthController health)
         {
             Reset();
             return;
