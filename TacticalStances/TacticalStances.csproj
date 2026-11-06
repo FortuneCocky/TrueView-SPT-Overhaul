@@ -41,6 +41,10 @@
       <HintPath>$(SPT_INSTALL_DIR)\EscapeFromTarkov_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(SPT_INSTALL_DIR)\EscapeFromTarkov_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.AnimationModule">
       <HintPath>$(SPT_INSTALL_DIR)\EscapeFromTarkov_Data\Managed\UnityEngine.AnimationModule.dll</HintPath>
       <Private>false</Private>

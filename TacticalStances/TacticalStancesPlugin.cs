@@ -248,6 +248,8 @@ public class TacticalStancesPlugin : BaseUnityPlugin
 
 
 
+        StancePresets.Bind(Config);
+
         DesiredStance = SavedStance.Value;
         if (EnableStances.Value)
         {
