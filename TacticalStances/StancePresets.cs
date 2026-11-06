@@ -170,13 +170,20 @@ internal static class StancePresets
 
     // ---- F12 drawer -------------------------------------------------------
 
+    // Row captions never wrap ("Preset" was breaking onto two lines), and
+    // share one width so the dropdown and name box line up.
+    private const float RowLabelWidth = 80f;
+    private static GUIStyle _rowLabel;
+    private static GUIStyle RowLabel =>
+        _rowLabel ??= new GUIStyle(GUI.skin.label) { wordWrap = false, clipping = TextClipping.Overflow };
+
     private static void Draw(ConfigEntryBase entry)
     {
         GUILayout.BeginVertical();
 
         // Dropdown: selecting only picks — Apply does the work.
         GUILayout.BeginHorizontal();
-        GUILayout.Label("Preset", GUILayout.Width(60));
+        GUILayout.Label("Preset", RowLabel, GUILayout.Width(RowLabelWidth));
         string shown = _selected ?? (_presets.Count == 0 ? "(no presets yet)" : "(select)");
         if (GUILayout.Button(shown + (_dropdownOpen ? "  ▲" : "  ▼"), GUILayout.ExpandWidth(true)))
             _dropdownOpen = !_dropdownOpen && _presets.Count > 0;
@@ -199,7 +206,7 @@ internal static class StancePresets
         }
 
         GUILayout.BeginHorizontal();
-        GUILayout.Label("Name", GUILayout.Width(60));
+        GUILayout.Label("Name", RowLabel, GUILayout.Width(RowLabelWidth));
         _nameField = GUILayout.TextField(_nameField ?? "", 40, GUILayout.ExpandWidth(true));
         GUILayout.EndHorizontal();
 
