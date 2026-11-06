@@ -41,6 +41,7 @@ internal static class HandlingManager
         {
             return;
         }
+        DriftProbe.Tick(player, dt);
         TickSystems(player, dt);
         FieldOfViewSystem.Tick(player);
         // Last, after every input it reads has updated — and every frame, so

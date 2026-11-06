@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace TacticalStances;
 
-[BepInPlugin("com.devin.tacticalstances", "Tactical Stances", "1.3.1")]
+[BepInPlugin("com.devin.tacticalstances", "Tactical Stances", "1.4.0")]
 public class TacticalStancesPlugin : BaseUnityPlugin
 {
     public static ManualLogSource Log;
@@ -112,8 +112,6 @@ public class TacticalStancesPlugin : BaseUnityPlugin
     public static ConfigEntry<float> LowReadySprintAccel;
     public static ConfigEntry<float> HighReadyMoveSpeed;
     public static ConfigEntry<float> ActiveAimAdsSpeed;
-    public static ConfigEntry<float> ActiveAimRecoil;
-    public static ConfigEntry<float> CantedAimRecoil;
     public static ConfigEntry<bool> CantedAutoSideSight;
     public static ConfigEntry<bool> EnableScopeClearance;
     public static ConfigEntry<float> ScopeClearZone;
@@ -205,7 +203,7 @@ public class TacticalStancesPlugin : BaseUnityPlugin
         WeightReferenceKg = Config.Bind(ws, "Reference Weight (kg)", 4f, new ConfigDescription("Weapon weight that maps to 1.0x drain — roughly a typical rifle.", new AcceptableValueRange<float>(1f, 10f), Array.Empty<object>()));
         WeightMinMul = Config.Bind(ws, "Min Weight Multiplier", 0.3f, new ConfigDescription("Drain multiplier floor for the lightest weapons.", new AcceptableValueRange<float>(0.05f, 1f), Array.Empty<object>()));
         WeightMaxMul = Config.Bind(ws, "Max Weight Multiplier", 2f, new ConfigDescription("Drain multiplier cap for the heaviest weapons (LMGs).", new AcceptableValueRange<float>(1f, 4f), Array.Empty<object>()));
-        SwapTime = Config.Bind(ws, "Swap Time", 1f, new ConfigDescription("Weapon draw/holster speed. 1.0 = natural rate for a ~4kg built rifle; lower = faster, higher = slower. The full gun's weight (attachments, mag and ammo included) scales it on top: a ~1kg pistol draws about 2x faster than a rifle, a 12kg LMG about 1.5x slower. Always capped between 0.4x and 1.3x of the game's own draw speed.", new AcceptableValueRange<float>(0.2f, 3f), Array.Empty<object>()));
+        SwapTime = Config.Bind(ws, "Swap Time", 1f, new ConfigDescription("Weapon draw/holster speed. 1.0 = natural rate for a ~4kg built rifle; lower = faster, higher = slower. The full gun's weight (attachments, mag and ammo included) scales it on top: a ~1kg pistol draws about 2x faster than a rifle, a 12kg LMG about 1.5x slower. Always capped between 0.4x and 1.3x of the game's own draw speed, and a quick-draw or skill boost plus weight never goes past 2x, the game's own fastest draw. Reloads always play at normal speed.", new AcceptableValueRange<float>(0.2f, 3f), Array.Empty<object>()));
 
 
 
@@ -214,8 +212,6 @@ public class TacticalStancesPlugin : BaseUnityPlugin
         LowReadySprintAccel = Config.Bind("f - Stance Bonuses", "Low Ready Sprint Acceleration", 1.55f, new ConfigDescription("Sprint acceleration multiplier while Low Ready is selected. 1 = vanilla, 1.35 = ~35% faster sprint spool-up.", new AcceptableValueRange<float>(1f, 2f), Array.Empty<object>()));
         HighReadyMoveSpeed = Config.Bind("f - Stance Bonuses", "High Ready Move Speed", 1.35f, new ConfigDescription("Movement speed multiplier while High Ready is selected. 1 = vanilla.", new AcceptableValueRange<float>(1f, 1.5f), Array.Empty<object>()));
         ActiveAimAdsSpeed = Config.Bind("f - Stance Bonuses", "Active Aim ADS Move Speed", 1f, new ConfigDescription("ADS movement speed multiplier while Active Aim is selected. 1 = vanilla.", new AcceptableValueRange<float>(1f, 2f), Array.Empty<object>()));
-        ActiveAimRecoil = Config.Bind("f - Stance Bonuses", "Active Aim Recoil", 0.75f, new ConfigDescription("Recoil multiplier while firing from Active Aim. 1 = vanilla hipfire, lower = weaker recoil.", new AcceptableValueRange<float>(0.3f, 1f), Array.Empty<object>()));
-        CantedAimRecoil = Config.Bind("f - Stance Bonuses", "Canted Aim Recoil", 0.75f, new ConfigDescription("Recoil multiplier while firing from Canted Aim. 1 = vanilla hipfire, lower = weaker recoil.", new AcceptableValueRange<float>(0.3f, 1f), Array.Empty<object>()));
         CantedAutoSideSight = Config.Bind("g - Canted Aim", "Auto-Select Side Sight", true, "When canted aim activates, automatically switches the camera to a side-mounted (rotated) sight if the weapon has one, and restores your previous sight when you release. Same as pressing the 'change sight' key.");
 
         KeyLowReady = Config.Bind("b - Hotkeys", "Low Ready Key", new KeyboardShortcut(KeyCode.None), "Key to switch to Low Ready");
@@ -246,9 +242,9 @@ public class TacticalStancesPlugin : BaseUnityPlugin
         EnableProneScopeGuard = Config.Bind("l - Scope Clearance", "Prone Scope Guard", true, "While aiming prone, stops the game pulling the gun back when the barrel touches the ground, grass or your body. That pull moves the scope off your eye and blacks out the lens. A fully buried barrel still drops you out of ADS as normal.");
         BindStanceOffsets("k - Lean Shoulder Swap", out LeanSwapPosX, out LeanSwapPosY, out LeanSwapPosZ, out LeanSwapRotX, out LeanSwapRotY, out LeanSwapRotZ, new Vector3(-0.114f, -0.002816901f, -0.002816901f), new Vector3(0f, -1.126761f, 0f));
 
-
-
         StancePresets.Bind(Config);
+
+
 
         DesiredStance = SavedStance.Value;
         if (EnableStances.Value)
@@ -261,6 +257,7 @@ public class TacticalStancesPlugin : BaseUnityPlugin
 
     private void Update()
     {
+        WeaponSwapSpeed.Tick();
         if (!_wasEnabled && EnableStances.Value)
         {
             PatchAll();

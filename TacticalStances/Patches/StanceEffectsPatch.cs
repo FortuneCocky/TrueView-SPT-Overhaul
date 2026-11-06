@@ -1,6 +1,5 @@
 using System.Reflection;
 using EFT;
-using EFT.Animations.NewRecoil;
 using HarmonyLib;
 using UnityEngine;
 
@@ -48,6 +47,9 @@ public static class StanceMoveSpeedPatch
 
     // Vanilla caps speed at StateSpeedLimit; we raise the cap while High
     // Ready is selected so all movement (walk, strafe, crouch) is faster.
+    // Another mod's ClampSpeed patch may already have lowered or raised the
+    // result (inertia, momentum): its share of the vanilla cap is kept, so
+    // High Ready never undoes another mod's slowdown.
     [HarmonyPostfix]
     private static void Postfix(MovementContext __instance, float speed, ref float __result)
     {
@@ -58,7 +60,12 @@ public static class StanceMoveSpeedPatch
         if (!(_playerField?.GetValue(__instance) is Player player) || !player.IsYourPlayer)
             return;
 
-        __result = Mathf.Clamp(speed, 0f, __instance.StateSpeedLimit * TacticalStancesPlugin.HighReadyMoveSpeed.Value);
+        float vanilla = Mathf.Clamp(speed, 0f, __instance.StateSpeedLimit);
+        float raised = Mathf.Clamp(speed, 0f, __instance.StateSpeedLimit * TacticalStancesPlugin.HighReadyMoveSpeed.Value);
+        if (__result < vanilla - 0.0001f)
+            __result = raised * (__result / vanilla);
+        else
+            __result = Mathf.Max(__result, raised);
     }
 }
 
@@ -86,38 +93,5 @@ public static class StanceAdsSpeedPatch
                 Mathf.Clamp(limit * TacticalStancesPlugin.ActiveAimAdsSpeed.Value, 0f, 2f);
             __instance.method_5();
         }
-    }
-}
-
-[HarmonyPatch(typeof(NewRecoilShotEffect), "AddRecoilForce")]
-public static class StanceRecoilPatch
-{
-    private static readonly FieldInfo _playerField = AccessTools.Field(typeof(Player.FirearmController), "_player");
-
-    // incomingForce feeds both rotation and position recoil power — scaling
-    // it weakens the whole recoil impulse while Active Aim is selected.
-    [HarmonyPrefix]
-    private static void Prefix(NewRecoilShotEffect __instance, ref float incomingForce)
-    {
-        if (!TacticalStancesPlugin.EnableStances.Value)
-            return;
-        // EffectiveStance counts the fire-return pose: shots fired from
-        // Low/High Ready while the weapon transitions to Active Aim get
-        // the Active Aim recoil cut, not vanilla hipfire recoil.
-        EStance stance = TacticalStancesPlugin.EffectiveStance;
-        if (stance != EStance.ActiveAim && stance != EStance.CantedAim)
-            return;
-        if (__instance?._firearmController == null)
-            return;
-
-        // Only weaken while firing from the stance — ADS keeps vanilla recoil.
-        if (__instance._firearmController.IsAiming)
-            return;
-        if (!(_playerField?.GetValue(__instance._firearmController) is Player player) || !player.IsYourPlayer)
-            return;
-
-        incomingForce *= stance == EStance.CantedAim
-            ? TacticalStancesPlugin.CantedAimRecoil.Value
-            : TacticalStancesPlugin.ActiveAimRecoil.Value;
     }
 }

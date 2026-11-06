@@ -1,7 +1,10 @@
-; Euphoria Reaction balance preset: Natural
+; Euphoria Reaction toughness: Natural
 ; Our own values, found offline by character/tune_balance.py: a search over our body's behaviour under
 ; 36 kinds of hit (where, from which side, how hard) for lifelike staggers and falls. Use it with the
 ; muscle values in body.json, which came from the same search.
+; Measured offline: 33% of those hits put him down (leg hits; chest and belly hits he staggers through),
+; about 5 steps and 1.3 m of stagger in the first second.
+; Tough and Easy are this file with the odds moved; the stagger itself is the same in all three.
 
 NMShot_Standing * {
   shotMaxSteps                    8       ; engine 6
@@ -19,4 +22,14 @@ NMShot_IsMoving * {
   balanceMaxSteps                 4       ; engine 3
   balanceLeanAmount               0.050   ; engine 0.4
   balanceBodyDamping              1.370   ; engine 0.9
+}
+
+; Read by the mod, not the engine: shot on the run (staggerFall). The upright pull decides how many
+; stumbling steps he takes before he goes down: 3.2 and he tumbles after 1-2 steps, 3.6 and up he
+; staggers 4-6. Slower runs get the stiffer pull, so the faster he was going the likelier he goes down.
+; Offline: 58% down at 3.5 m/s, about 90% at 5 m/s and over.
+EuphoriaRun * {
+  runStaggerSpeed                 3.5     ; m/s: hit moving at least this fast, he staggers on (slower: the shot above)
+  runUprightSlow                  4.5     ; upright pull of the stagger at runStaggerSpeed
+  runUprightFast                  3.6     ; ... at 5 m/s and over
 }

@@ -129,7 +129,7 @@ internal partial class NmBody
         {
             case Settle.Stand:
                 if (RecoverStance() != StartPose.Prone) // too hurt to stay up: no pull upright, he's going down
-                    Send("stayUpright", ("start", true), ("stiffness", Tune.Upright * 2f));
+                    Send("stayUpright", ("start", true), ("stiffness", _presetUpright * 2.5f)); // ~8: firm while the stance blends in
                 ok = RecoverOnFeet(false, h);
                 break;
             case Settle.Crouch:

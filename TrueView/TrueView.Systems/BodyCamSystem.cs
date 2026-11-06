@@ -12,21 +12,28 @@ namespace TrueView.Systems;
 /// Chest-mounted body camera. Builds one camera-space offset from player
 /// inputs only (turn rate, gait phase, shots, hits, breathing) and adds it to
 /// the main camera after every script's LateUpdate, then puts the camera back
-/// at the very start of the next frame. The game, the weapon and the deadzone
-/// never see the offset, so it cannot feed back into the hands — the gun
-/// simply moves in the frame.
+/// just before the game places it for the next frame (Player.LateUpdate). The
+/// game's camera code, the weapon and the deadzone never see the offset, so it
+/// cannot feed back into the hands — the gun simply moves in the frame.
 ///
-/// The offset stays on for the whole render, post-processing included: TAA,
-/// upscalers and motion vectors all read the camera at different points of
-/// the render, and a camera that moved and moved back inside one frame left
-/// them reprojecting history from the wrong pose (ghosted, smeared, darker
-/// grass and trees).
+/// Everything else sees the camera exactly where the last frame was drawn
+/// from, as in vanilla. That matters: TAA, upscalers and motion vectors read
+/// the camera at different points of the frame, and the grass renderer
+/// (GPUInstancer) builds its culling and its grass motion vectors in Update.
+/// A camera that was put back any earlier than the game's own placement left
+/// the grass moving against a pose that was never drawn, so TAA smeared it.
 /// </summary>
 internal static class BodyCamSystem
 {
     private const float MaxPosition = 0.04f;
     private const float MaxPitchYaw = 6f;
-    private const float MaxRoll = 8f;
+    private const float MaxRoll = 12f;
+    private const float MaxFollow = 8f;
+
+    // Stock bump spring: ~3 Hz, under-damped, over in ~0.2 s. Impulse = peak * BumpGain.
+    private const float BumpOmega = 20f;
+    private const float BumpZeta = 0.5f;
+    private const float BumpGain = 36f;
 
     // Shot jolt spring: ~6 Hz, under-damped — peaks in ~40 ms, a small
     // overshoot, settled in ~150 ms. Impulse = peak * JoltGain.
@@ -49,12 +56,20 @@ internal static class BodyCamSystem
 
     // --- Render-time application ---
     private static bool _installed;
+    // Last frame the player loop ran our apply step, and when we last re-hooked.
+    private static int _loopFrame = -1;
+    private static float _lastHookTime = -10f;
+    private static int _rehooks;
     private static bool _applied;
     private static Camera _appliedCamera;
+    // Kept in the camera's local space: the head animates under it between
+    // the apply and the put-back, which moves the world pose but not this.
     private static Vector3 _savedPos;
     private static Quaternion _savedRot;
     private static Vector3 _writtenPos;
     private static Quaternion _writtenRot;
+    // Last frame the game was about to place the camera (Player.LateUpdate).
+    private static int _gameCameraFrame = -1;
     private static bool _loggedApply;
 
     // Player loop markers for the two steps below.
@@ -89,6 +104,28 @@ internal static class BodyCamSystem
 
     private static Vector3 _injuryDrift;
     private static float _injuryTime;
+
+    // --- Chest mount: where the camera sits and what it turns with ---
+    // Body space below the eye (x right, y up, z forward), metres.
+    private static Vector3 _mount;
+    // x yaw, y pitch: the chest turned toward the gun, degrees.
+    private static Vector2 _follow;
+    private static Vector2 _followVel;
+    private static float _sprintBlend;
+    private static float _leanRoll;
+
+    // --- Landing jar ---
+    private static bool _wasGrounded = true;
+    private static float _airTime;
+    private static float _fallSpeed;
+    private static float _lastY = float.NaN;
+
+    // --- Stock bump ---
+    private static bool _wasAiming;
+    private static Vector3 _bump;
+    private static Vector3 _bumpVel;
+    private static Vector3 _bumpPos;
+    private static Vector3 _bumpPosVel;
 
     /// <summary>
     /// A shot was fired. <paramref name="kick"/> is the weapon/skill/fatigue
@@ -185,6 +222,7 @@ internal static class BodyCamSystem
 
         TickTorsoLag(on, dt);
         TickSteps(player, on, dt);
+        TickChest(player, on, dt);
 
         // Shot jolt — sub-stepped, the spring is stiff.
         int n = Mathf.CeilToInt(dt / (1f / 240f));
@@ -222,12 +260,120 @@ internal static class BodyCamSystem
         float tilt = on ? HandlingConfig.BodyCamTilt?.Value ?? 0f : 0f;
         float mountRoll = (Mathf.PerlinNoise(Time.time * 0.05f, 3.7f) - 0.5f) * 2f * tilt;
 
-        Vector3 body = new Vector3(_lag.y + breathPitch, _lag.x, mountRoll) + _stepRot + _stepWander;
-        Vector3 euler = (body + _jolt) * bodyScale + _knock + _injuryDrift;
-        Vector3 pos = (_stepPos + breathPos) * bodyScale + _knockPos;
+        // Sprinting pitches the chest forward; no head keeps it level.
+        float sprintPitch = _sprintBlend * 2.5f * (on ? HandlingConfig.BodyCamUnstabilised?.Value ?? 0f : 0f);
 
-        _euler = ClampEuler(euler, MaxPitchYaw, MaxRoll);
+        // A magnified scope shows every wobble, so the stock bump stays out of it.
+        float bumpScale = 1f - ScopeOpticsSystem.Magnified;
+
+        Vector3 body = new Vector3(_lag.y + breathPitch + sprintPitch, _lag.x, mountRoll + _leanRoll) + _stepRot + _stepWander;
+        Vector3 euler = (body + _jolt) * bodyScale + _knock + _injuryDrift + _bump * bumpScale;
+        Vector3 pos = (_stepPos + breathPos) * bodyScale + _knockPos + _bumpPos * bumpScale;
+
+        // The chest follow has its own limit: it is a slow pose, not a shake.
+        _euler = ClampEuler(euler, MaxPitchYaw, MaxRoll) + new Vector3(_follow.y, _follow.x, 0f);
         _pos = Vector3.ClampMagnitude(pos, MaxPosition);
+    }
+
+    private static void TickChest(Player player, bool on, float dt)
+    {
+        MovementContext mc = player.MovementContext;
+        bool prone = mc?.CurrentState != null && (mc.CurrentState.Name == EPlayerState.ProneMove || mc.CurrentState.Name == EPlayerState.ProneIdle);
+        // Aiming puts the eye back at the sight, whatever ADS fade says: a
+        // camera on the chest would see the sight from below.
+        float eye = 1f - _adsBlend;
+        _sprintBlend = Mathf.MoveTowards(_sprintBlend, HandlingState.IsSprinting ? 1f : 0f, 4f * dt);
+
+        // Mount: below the eye, on the chest. Prone, the chest is on the
+        // ground and the camera would be in the dirt.
+        float height = on ? (HandlingConfig.BodyCamMountHeight?.Value ?? 0f) * 0.01f : 0f;
+        float side = on ? (HandlingConfig.BodyCamMountSide?.Value ?? 0f) * 0.01f : 0f;
+        if (prone)
+            height *= 0.25f;
+        Vector3 mountTarget = new Vector3(side, -height, 0f) * eye;
+        _mount = Vector3.Lerp(_mount, mountTarget, 1f - Mathf.Exp(-20f * dt));
+
+        // Chest follow: the chest turns with the gun, so the view swings part
+        // of the way toward where the gun points inside the deadzone. Reads
+        // the deadzone's own offset every frame, so its settings apply live.
+        float follow = on ? HandlingConfig.BodyCamChestFollow?.Value ?? 0f : 0f;
+        if (!HandlingState.HasWeapon || HandlingManager.InFreeLook(player) || StanceOverhaulCompat.HandsOwned)
+            follow = 0f;
+        follow *= eye * (1f - _sprintBlend);
+        Vector2 followTarget = Vector2.ClampMagnitude(ProceduralHipSystem.ControlOffset * follow, MaxFollow);
+        const float followOmega = 7f;
+        const float followZeta = 0.8f;
+        _followVel += ((followTarget - _follow) * (followOmega * followOmega) - _followVel * (2f * followZeta * followOmega)) * dt;
+        _follow += _followVel * dt;
+
+        // Unstabilised body: a lean rolls the torso further than the head,
+        // which tilts back toward level. Tilt > 0 leans right, roll < 0 rolls right.
+        float unstable = on ? HandlingConfig.BodyCamUnstabilised?.Value ?? 0f : 0f;
+        float lean = mc != null ? Mathf.Clamp(mc.SmoothedTilt / 5f, -1f, 1f) : 0f;
+        _leanRoll = Mathf.Lerp(_leanRoll, -lean * 4f * unstable, 1f - Mathf.Exp(-8f * dt));
+
+        TickLanding(player, mc, unstable, dt);
+        TickStockBump(player, on, dt);
+    }
+
+    private static void TickLanding(Player player, MovementContext mc, float unstable, float dt)
+    {
+        // Fall speed from the body's own height change, so nothing about the
+        // game's velocity bookkeeping matters.
+        float y = player.Position.y;
+        float vy = float.IsNaN(_lastY) ? 0f : (y - _lastY) / dt;
+        _lastY = y;
+
+        bool grounded = mc == null || mc.IsGrounded;
+        if (!grounded)
+        {
+            _airTime += dt;
+            _fallSpeed = Mathf.Max(_fallSpeed, Mathf.Min(-vy, 20f));
+        }
+        else
+        {
+            // A jump lands at ~3 m/s, a 3 m drop at ~7.5 m/s.
+            if (!_wasGrounded && _airTime > 0.15f && unstable > 0f)
+            {
+                float impact = Mathf.Clamp01((_fallSpeed - 1f) / 6f) * unstable;
+                _stepPosVel.y -= 0.5f * impact;
+                _stepRotVel.x += 70f * impact;
+            }
+            _airTime = 0f;
+            _fallSpeed = 0f;
+        }
+        _wasGrounded = grounded;
+    }
+
+    private static void TickStockBump(Player player, bool on, float dt)
+    {
+        bool aiming = HandlingState.IsAiming;
+        if (aiming != _wasAiming)
+        {
+            _wasAiming = aiming;
+            float bump = on && HandlingState.HasWeapon ? HandlingConfig.BodyCamStockBump?.Value ?? 0f : 0f;
+            if (!aiming)
+                bump *= 0.5f;
+            if (bump > 0f)
+            {
+                // The stock pushes the shooting shoulder back: the camera
+                // tips up and turns a little toward that side.
+                float s = 1f;
+                try { if (player.MovementContext?.LeftStanceController?.LeftStance == true) s = -1f; } catch { }
+                if (!aiming)
+                    s = -s;
+                _bumpVel += new Vector3(-0.8f, 0.3f * s, -0.3f * s) * (BumpGain * bump);
+                _bumpPosVel += new Vector3(0f, 0f, aiming ? -0.006f : 0.004f) * (BumpGain * bump);
+            }
+        }
+
+        int n = Mathf.CeilToInt(dt / (1f / 240f));
+        float h = dt / n;
+        for (int i = 0; i < n; i++)
+        {
+            Spring(ref _bump, ref _bumpVel, BumpOmega, BumpZeta, h);
+            Spring(ref _bumpPos, ref _bumpPosVel, BumpOmega, BumpZeta, h);
+        }
     }
 
     private static void TickTorsoLag(bool on, float dt)
@@ -321,18 +467,32 @@ internal static class BodyCamSystem
 
     private static void EnsureInstalled()
     {
+        // The game keeps its own copy of the player loop
+        // (PlayerLoopSystemHelpers) and puts it back whenever it edits it,
+        // around raid loading for one, which drops our steps without a word.
+        // If the apply step has not run for a few frames, hook in again.
+        if (_installed && Time.frameCount - _loopFrame > 5 && Time.unscaledTime - _lastHookTime > 1f)
+        {
+            _installed = false;
+            if (_applied)
+                Restore();
+            _rehooks++;
+            if (_rehooks <= 5)
+                Log.Info($"[BodyCam] the game replaced the player loop, hooking in again ({_rehooks})");
+        }
         if (_installed)
             return;
         _installed = true;
+        _lastHookTime = Time.unscaledTime;
         PlayerLoopSystem loop = PlayerLoop.GetCurrentPlayerLoop();
         if (!InsertFirst(ref loop, typeof(PostLateUpdate), typeof(BodyCamApply), ApplyBeforeRender)
-            || !InsertFirst(ref loop, typeof(EarlyUpdate), typeof(BodyCamRestore), RestoreAtFrameStart))
+            || !InsertFirst(ref loop, typeof(EarlyUpdate), typeof(BodyCamRestore), RestoreIfStale))
         {
             Log.Warning("[BodyCam] could not hook the player loop, body camera off");
             return;
         }
         PlayerLoop.SetPlayerLoop(loop);
-        Log.Info("[BodyCam] hooked: applied after LateUpdate, held through the render, removed at the start of the next frame");
+        Log.Info("[BodyCam] hooked: applied after LateUpdate, held until the game places the camera for the next frame");
     }
 
     // Puts a step at the front of one phase of the player loop.
@@ -363,20 +523,26 @@ internal static class BodyCamSystem
     // before anything renders.
     private static void ApplyBeforeRender()
     {
+        _loopFrame = Time.frameCount;
         if (_applied)
-            RestoreAtFrameStart();
-        if (_pos.sqrMagnitude < 1e-12f && _euler.sqrMagnitude < 1e-8f)
+            Restore();
+        if (_pos.sqrMagnitude < 1e-12f && _euler.sqrMagnitude < 1e-8f && _mount.sqrMagnitude < 1e-12f)
             return;
         Camera cam = Camera.main;
         if (cam == null)
             return;
 
         Transform t = cam.transform;
-        _savedPos = t.position;
-        _savedRot = t.rotation;
-        t.SetPositionAndRotation(_savedPos + _savedRot * _pos, _savedRot * Quaternion.Euler(_euler));
-        _writtenPos = t.position;
-        _writtenRot = t.rotation;
+        _savedPos = t.localPosition;
+        _savedRot = t.localRotation;
+        // The mount hangs below the eye in body space: straight down and
+        // across the chest, whatever the head's pitch.
+        Vector3 eyePos = t.position;
+        Quaternion eyeRot = t.rotation;
+        Quaternion body = Quaternion.Euler(0f, eyeRot.eulerAngles.y, 0f);
+        t.SetPositionAndRotation(eyePos + body * _mount + eyeRot * _pos, eyeRot * Quaternion.Euler(_euler));
+        _writtenPos = t.localPosition;
+        _writtenRot = t.localRotation;
         _appliedCamera = cam;
         _applied = true;
 
@@ -387,9 +553,26 @@ internal static class BodyCamSystem
         }
     }
 
-    // Start of the next frame, before any script runs: hand the game back its
-    // own camera pose. If something already moved the camera, leave it be.
-    private static void RestoreAtFrameStart()
+    /// <summary>
+    /// Player.LateUpdate is about to run: hand the game back its own camera
+    /// pose before it reads it to place this frame's camera.
+    /// </summary>
+    public static void BeforeGameCamera()
+    {
+        _gameCameraFrame = Time.frameCount;
+        Restore();
+    }
+
+    // Fallback at the start of a frame: no player has placed the camera for
+    // a while (raid over, menus), so nobody else will put it back.
+    private static void RestoreIfStale()
+    {
+        if (_applied && Time.frameCount - _gameCameraFrame > 2)
+            Restore();
+    }
+
+    // If something already moved the camera, leave it be.
+    private static void Restore()
     {
         if (!_applied)
             return;
@@ -399,14 +582,14 @@ internal static class BodyCamSystem
         if (cam == null)
             return;
         Transform t = cam.transform;
-        if ((t.position - _writtenPos).sqrMagnitude < 1e-10f && Quaternion.Dot(t.rotation, _writtenRot) > 0.9999999f)
-            t.SetPositionAndRotation(_savedPos, _savedRot);
+        if ((t.localPosition - _writtenPos).sqrMagnitude < 1e-10f && Quaternion.Dot(t.localRotation, _writtenRot) > 0.9999999f)
+            t.SetLocalPositionAndRotation(_savedPos, _savedRot);
     }
 
     public static void Reset()
     {
         if (_applied)
-            RestoreAtFrameStart();
+            Restore();
         _pos = Vector3.zero;
         _euler = Vector3.zero;
         _adsBlend = 0f;
@@ -429,5 +612,19 @@ internal static class BodyCamSystem
         _knockPosVel = Vector3.zero;
         _injuryDrift = Vector3.zero;
         _injuryTime = 0f;
+        _mount = Vector3.zero;
+        _follow = Vector2.zero;
+        _followVel = Vector2.zero;
+        _sprintBlend = 0f;
+        _leanRoll = 0f;
+        _wasGrounded = true;
+        _airTime = 0f;
+        _fallSpeed = 0f;
+        _lastY = float.NaN;
+        _wasAiming = false;
+        _bump = Vector3.zero;
+        _bumpVel = Vector3.zero;
+        _bumpPos = Vector3.zero;
+        _bumpPosVel = Vector3.zero;
     }
 }

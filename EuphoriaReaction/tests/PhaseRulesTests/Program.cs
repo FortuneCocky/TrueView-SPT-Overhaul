@@ -18,9 +18,9 @@ internal static class Program
     private static int Main()
     {
         // StumbleWindows
-        Check("Short", PhaseRules.StumbleWindow(StumbleLength.Short, 9, 9) == (0.4f, 1.5f));
-        Check("Natural", PhaseRules.StumbleWindow(StumbleLength.Natural, 9, 9) == (0.8f, 3.0f));
-        Check("Long", PhaseRules.StumbleWindow(StumbleLength.Long, 9, 9) == (1.5f, 5.0f));
+        Check("Short", PhaseRules.StumbleWindow(StumbleLength.Short, 9, 9) == (0.4f, 3.0f));
+        Check("Natural", PhaseRules.StumbleWindow(StumbleLength.Natural, 9, 9) == (0.8f, 6.0f));
+        Check("Long", PhaseRules.StumbleWindow(StumbleLength.Long, 9, 9) == (1.5f, 8.0f));
         Check("Custom", PhaseRules.StumbleWindow(StumbleLength.Custom, 1.0f, 4.0f) == (1.0f, 4.0f));
         // CustomMaxBelowMin
         var w = PhaseRules.StumbleWindow(StumbleLength.Custom, 2.0f, 1.0f);
@@ -29,7 +29,7 @@ internal static class Program
         Check("TooEarly", PhaseRules.StumbleDecision(0.5f, 0.8f, 3f, true, false) == StumbleExit.Stay);
         Check("SteadyAfterMin", PhaseRules.StumbleDecision(0.9f, 0.8f, 3f, true, false) == StumbleExit.Recover);
         Check("Wobbling", PhaseRules.StumbleDecision(2.0f, 0.8f, 3f, false, false) == StumbleExit.Stay);
-        Check("ForcedAtMax", PhaseRules.StumbleDecision(3.0f, 0.8f, 3f, false, false) == StumbleExit.ForcedFall);
+        Check("EasedBackAtMax", PhaseRules.StumbleDecision(3.0f, 0.8f, 3f, false, false) == StumbleExit.TooLong);
         Check("GoingDownWins", PhaseRules.StumbleDecision(0.1f, 0.8f, 3f, true, true) == StumbleExit.Fall);
         // FallDone
         Check("FallTooSoon", !PhaseRules.FallDone(0.2f, 0.2f));

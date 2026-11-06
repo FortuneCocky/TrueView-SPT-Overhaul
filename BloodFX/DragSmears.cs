@@ -42,7 +42,8 @@ internal sealed class DragSmears
     private Vector3[] _v;
     private Color32[] _c;
     private int _next, _live;
-    private float _nextTick;
+    private float _nextTick, _nextAudit;
+    private bool _audited;
 
     public DragSmears(Transform parent, Material mat, int capacity)
     {
@@ -77,6 +78,7 @@ internal sealed class DragSmears
         _sph = new float[capacity * Streaks];
         _v = new Vector3[capacity * Per];
         _c = new Color32[capacity * Per];
+        Wet.Fill(_c);
         var tris = new int[capacity * (Samples - 1) * Streaks * 12];
         int t = 0;
         for (int i = 0; i < capacity; i++)
@@ -218,6 +220,11 @@ internal sealed class DragSmears
         }
         _mesh.vertices = _v;
         _mesh.colors32 = _c;
+        if (now >= _nextAudit && BloodFXPlugin.Instance != null && BloodFXPlugin.Instance.DebugLog.Value)
+        {
+            _nextAudit = now + 2f;
+            Wet.Audit(_c, _c.Length, "drag smears", ref _audited);
+        }
         _renderer.enabled = any;
         if (any)
         {

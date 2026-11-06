@@ -27,6 +27,9 @@ internal static class ProceduralHipSystem
     private static float _zoneTransitionStart;
     private static float _zoneTransitionEnd;
     private static bool _handsTransitionActive;
+    private static float _handsBusySince = -1f;
+    private static bool _handsStuck;
+    private const float HandsStuckSeconds = 6f; // past the longest belt or tube reload
     private static bool _recoilReturnActive;
     private static Quaternion _recoilAnchor = Quaternion.identity;
     // Return-to-center strength this tick (1 = full centering).
@@ -155,6 +158,10 @@ internal static class ProceduralHipSystem
     public static float ControlAngle { get; private set; }
 
     public static bool ControlsCamera => false;
+
+    // Read by DriftProbe.
+    public static float ZoneDegrees => _zoneDeg;
+    public static bool CameraSettling => _cameraSettleActive;
 
     public static bool IsZoneTransitionActive => _handsTransitionActive ||
         Time.unscaledTime < _zoneTransitionEnd || Time.unscaledTime < _cameraSuppressUntil;
@@ -1244,6 +1251,32 @@ internal static class ProceduralHipSystem
 
     public static void SetHandsTransition(bool active)
     {
+        // Fail-safe: no draw, swap or reload takes this long. Hands still
+        // "busy" past it are stuck (another mod broke the game's hand change),
+        // so stop holding the deadzone open at 45 degrees and the camera
+        // suppressed, or the gun stays far off from where you look.
+        if (active)
+        {
+            if (_handsBusySince < 0f)
+                _handsBusySince = Time.unscaledTime;
+            else if (Time.unscaledTime - _handsBusySince > HandsStuckSeconds)
+            {
+                if (!_handsStuck)
+                {
+                    _handsStuck = true;
+                    Utilities.Log.Warning($"Hands busy for over {HandsStuckSeconds:F0} s: treating them as stuck, deadzone back to normal");
+                }
+                active = false;
+            }
+        }
+        else
+        {
+            if (_handsStuck)
+                Utilities.Log.Info($"Hands free again after {Time.unscaledTime - _handsBusySince:F1} s");
+            _handsBusySince = -1f;
+            _handsStuck = false;
+        }
+
         if (active)
         {
             _handsTransitionActive = true;

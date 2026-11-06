@@ -86,7 +86,7 @@ internal static class ShotSystem
 				_baseGainWeaponId = weaponId;
 				_baseGainPerShot = breath.AmplitudeGainPerShot;
 			}
-			breath.AmplitudeGainPerShot = (HandlingConfig.ShotMisalignmentOn ? (_baseGainPerShot * (1f + HandlingConfig.ShotBreathPenaltyValue) * (1f + (1f - HandlingState.HandsStamina01) * HandlingConfig.StaminaShotInfluenceValue)) : _baseGainPerShot);
+			breath.AmplitudeGainPerShot = (HandlingConfig.RecoilOn ? (_baseGainPerShot * (1f + HandlingConfig.ShotBreathPenaltyValue) * (1f + (1f - HandlingState.HandsStamina01) * HandlingConfig.StaminaShotInfluenceValue)) : _baseGainPerShot);
 		}
 	}
 

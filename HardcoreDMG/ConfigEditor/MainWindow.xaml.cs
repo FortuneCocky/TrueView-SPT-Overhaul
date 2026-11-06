@@ -16,9 +16,9 @@ public partial class MainWindow : Window
 {
     private const string ClientCfgName = "com.devin.hardcoredmg.client.cfg";
     private const string ModelSection = "1. Damage Model";
-    private const string ReactionSection = "2. Wound Reactions";
+    private const string PlayerDamageSection = "1. Damage Model (Player)";
+    private const string ReactionSection = "2. Wound Reactions (Player)";
     private const string BulletSection = "3. Bullet Physics";
-    private const string StanceSection = "4. Stance Lock";
     private const string CrippleSection = "5. Leg Cripple";
     private const string ShotgunSection = "6. Shotguns";
 
@@ -49,79 +49,177 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         // Server defaults match HardcoreDMG/config.jsonc and Models/ModConfig.cs.
-        AddBool("Enabled", ModEnabled, true);
-        AddBool("BodyModel.Regulars", BodyRegulars, true);
-        AddBool("BodyModel.Guards", BodyGuards, true);
-        AddBool("BodyModel.Raiders", BodyRaiders, true);
-        AddBool("BodyModel.Cultists", BodyCultists, true);
-        AddBool("BodyModel.Bosses", BodyBosses, true);
-        AddBool("BodyModel.Infected", BodyInfected, false);
-        _toughRegulars = AddFloat("Toughness.Regulars", ToughnessRows, "Regulars", 0.25f, 4f, 0.80f);
-        _toughElites = AddFloat("Toughness.Elites", ToughnessRows, "Elites (guards, raiders, cultists)", 0.25f, 4f, 0.90f);
-        _toughBosses = AddFloat("Toughness.Bosses", ToughnessRows, "Bosses", 0.25f, 4f, 1.20f);
-        _playerVitality = AddFloat("PlayerVitality", PlayerRows, "Vitality", 0.25f, 4f, 1.00f);
+        AddBool("Enabled", ModEnabled, true,
+            "Turns the server side of HardcoreDMG on or off: the body model, toughness and player vitality. Off = vanilla HP for everyone.");
+        AddBool("BodyModel.Regulars", BodyRegulars, true,
+            "Scavs, PMCs, snipers and any role not listed elsewhere get HardcoreDMG's body. Off = vanilla HP.");
+        AddBool("BodyModel.Guards", BodyGuards, true,
+            "Boss guards get HardcoreDMG's body. Off = vanilla HP.");
+        AddBool("BodyModel.Raiders", BodyRaiders, true,
+            "Raiders and rogues get HardcoreDMG's body. Off = vanilla HP.");
+        AddBool("BodyModel.Cultists", BodyCultists, true,
+            "Cultist warriors get HardcoreDMG's body. The priest counts as a boss.");
+        AddBool("BodyModel.Bosses", BodyBosses, true,
+            "Bosses, the Goons and the cultist priest get HardcoreDMG's body, with their own builds (Killa, Tagilla and so on). Off = vanilla HP.");
+        AddBool("BodyModel.Infected", BodyInfected, false,
+            "Infected get a tanky torso and limbs (about 275-345 chest HP) but a normal head, so headshots still drop them.");
+        _toughRegulars = AddFloat("Toughness.Regulars", ToughnessRows, "Regulars", 0.25f, 4f, 0.80f,
+            "Scales the HP of scavs, PMCs and snipers after the body model. 1.00 = unchanged, 0.80 = 20% less HP.");
+        _toughElites = AddFloat("Toughness.Elites", ToughnessRows, "Elites (guards, raiders, cultists)", 0.25f, 4f, 0.90f,
+            "Scales the HP of guards, raiders, rogues and cultist warriors after the body model. 1.00 = unchanged.");
+        _toughBosses = AddFloat("Toughness.Bosses", ToughnessRows, "Bosses", 0.25f, 4f, 1.20f,
+            "Scales the HP of bosses, the Goons and the cultist priest after the body model. 1.00 = unchanged.");
+        _playerVitality = AddFloat("PlayerVitality", PlayerRows, "Vitality", 0.25f, 4f, 1.00f,
+            "Scales your max HP on every body part. 1.00 = unchanged, 1.30 = 30% more HP.");
 
         // Client defaults match HardcoreDMG-Client/HardcoreDMGPlugin.cs.
-        AddBool("Client.DamageModel", DamageModelOn, true, ModelSection, "Damage model active");
-        AddBool("Client.TorsoZones", TorsoZonesOn, true, ModelSection, "Anatomical torso zones");
-        AddFloat("Client.DamageScale", DamageRows, "Overall damage", 0.1f, 3f, 1.0f, ModelSection, "Overall damage scale");
-        AddFloat("Client.HeadshotScale", DamageRows, "Headshot damage", 0.1f, 3f, 1.0f, ModelSection, "Headshot damage scale");
-        AddFloat("Client.ChestScale", DamageRows, "Chest damage", 0.1f, 3f, 1.0f, ModelSection, "Chest damage scale");
-        AddFloat("Client.StomachScale", DamageRows, "Stomach damage", 0.1f, 3f, 1.0f, ModelSection, "Stomach damage scale");
-        AddFloat("Client.ArmScale", DamageRows, "Arm damage", 0.1f, 3f, 0.85f, ModelSection, "Arm damage scale");
-        AddFloat("Client.LegScale", DamageRows, "Leg damage", 0.1f, 3f, 0.9f, ModelSection, "Leg damage scale");
-        AddFloat("Client.HeavyBleed", DamageRows, "Heavy bleed odds", 0f, 3f, 1.0f, ModelSection, "Heavy bleed odds scale");
-        AddFloat("Client.LightBleed", DamageRows, "Light bleed odds", 0f, 3f, 1.0f, ModelSection, "Light bleed odds scale");
+        AddBool("Client.DamageModel", DamageModelOn, true,
+            "Turns all of HardcoreDMG's client-side damage changes on or off, including the shotgun rework.", ModelSection, "Damage model active");
+        AddBool("Client.TorsoZones", TorsoZonesOn, true,
+            "Reads which part of the chest or stomach was hit: heart (always blacks the part), spine (takes most of what's left), flanks (glancing) and pelvis (bleeds more).", ModelSection, "Anatomical torso zones");
+        AddFloat("Client.DamageScale", DamageRows, "Overall damage", 0.1f, 3f, 1.0f,
+            "Scales every bullet, melee and explosion hit on the player and bots. 1.00 = unchanged.", ModelSection, "Overall damage scale");
+        AddFloat("Client.HeadshotScale", DamageRows, "Headshot damage", 0.1f, 3f, 1.0f,
+            "Extra scale for head hits, on top of the overall damage. 1.00 = unchanged.", ModelSection, "Headshot damage scale");
+        AddFloat("Client.ChestScale", DamageRows, "Chest damage", 0.1f, 3f, 1.0f,
+            "Scales chest hits, after the torso zone. 1.00 = unchanged.", ModelSection, "Chest damage scale");
+        AddFloat("Client.StomachScale", DamageRows, "Stomach damage", 0.1f, 3f, 1.0f,
+            "Scales stomach hits, after the torso zone. 1.00 = unchanged.", ModelSection, "Stomach damage scale");
+        AddFloat("Client.ArmScale", DamageRows, "Arm damage", 0.1f, 3f, 0.85f,
+            "Scales arm hits. Arm wounds are rarely fatal, so the default is a little lower.", ModelSection, "Arm damage scale");
+        AddFloat("Client.LegScale", DamageRows, "Leg damage", 0.1f, 3f, 0.9f,
+            "Scales leg hits. 1.00 = unchanged.", ModelSection, "Leg damage scale");
+        AddFloat("Client.HeavyBleed", DamageRows, "Heavy bleed odds", 0f, 3f, 1.0f,
+            "Scales the odds that a hit opens a heavy bleed. 0 = never, 1.00 = unchanged.", ModelSection, "Heavy bleed odds scale");
+        AddFloat("Client.LightBleed", DamageRows, "Light bleed odds", 0f, 3f, 1.0f,
+            "Scales the odds that a hit opens a light bleed. 0 = never, 1.00 = unchanged.", ModelSection, "Light bleed odds scale");
 
-        AddBool("Client.WeaponDrop", WeaponDropOn, false, ReactionSection, "Weapon drop on arm wounds");
-        AddFloat("Client.WeaponDropOdds", ReactionRows, "Weapon drop odds (%)", 0f, 100f, 2f, ReactionSection, "Weapon drop base odds percent");
-        AddBool("Client.WoundFall", WoundFallOn, true, ReactionSection, "Fall on leg wounds");
-        AddFloat("Client.WoundFallOdds", ReactionRows, "Fall odds (%)", 0f, 100f, 25f, ReactionSection, "Fall base odds percent");
+        AddBool("Client.PlayerDamage", PlayerDamageOn, false,
+            "Hits on you use only the settings below and ignore the Damage tab. Bots keep using the Damage tab. Off = you take damage like everyone else.", PlayerDamageSection, "Enable player damage settings");
+        AddFloat("Client.PlayerDamageScale", PlayerDamageRows, "Overall damage", 0.1f, 3f, 1.0f,
+            "Scales every bullet, melee and explosion hit on you. 1.00 = unchanged.", PlayerDamageSection, "Player overall damage scale");
+        AddFloat("Client.PlayerHeadshotScale", PlayerDamageRows, "Headshot damage", 0.1f, 3f, 1.0f,
+            "Extra scale for head hits on you, on top of your overall damage.", PlayerDamageSection, "Player headshot damage scale");
+        AddFloat("Client.PlayerChestScale", PlayerDamageRows, "Chest damage", 0.1f, 3f, 1.0f,
+            "Scales chest hits on you, after the torso zone.", PlayerDamageSection, "Player chest damage scale");
+        AddFloat("Client.PlayerStomachScale", PlayerDamageRows, "Stomach damage", 0.1f, 3f, 1.0f,
+            "Scales stomach hits on you, after the torso zone.", PlayerDamageSection, "Player stomach damage scale");
+        AddFloat("Client.PlayerArmScale", PlayerDamageRows, "Arm damage", 0.1f, 3f, 0.85f,
+            "Scales arm hits on you.", PlayerDamageSection, "Player arm damage scale");
+        AddFloat("Client.PlayerLegScale", PlayerDamageRows, "Leg damage", 0.1f, 3f, 0.9f,
+            "Scales leg hits on you.", PlayerDamageSection, "Player leg damage scale");
+        AddFloat("Client.PlayerHeavyBleed", PlayerDamageRows, "Heavy bleed odds", 0f, 3f, 1.0f,
+            "Scales the odds that a hit on you opens a heavy bleed. 0 = never.", PlayerDamageSection, "Player heavy bleed odds scale");
+        AddFloat("Client.PlayerLightBleed", PlayerDamageRows, "Light bleed odds", 0f, 3f, 1.0f,
+            "Scales the odds that a hit on you opens a light bleed. 0 = never.", PlayerDamageSection, "Player light bleed odds scale");
 
-        AddBool("Client.BulletPhysics", BulletPhysics, true, BulletSection, "Bullet physics active");
-        AddFloat("Client.Fragmentation", BulletRows, "Fragmentation odds", 0.5f, 3f, 1.5f, BulletSection, "Fragmentation odds scale");
-        AddFloat("Client.Penetration", BulletRows, "Penetration odds", 0.5f, 3f, 1.2f, BulletSection, "Penetration odds scale");
-        AddFloat("Client.ArmorEnergyLoss", BulletRows, "Energy lost through armor", 0f, 1f, 0.4f, BulletSection, "Energy lost through armor");
-        AddFloat("Client.Ricochet", BulletRows, "Ricochet odds", 0.5f, 3f, 1.3f, BulletSection, "Ricochet odds scale");
+        AddBool("Client.WeaponDrop", WeaponDropOn, false,
+            "A bad arm wound can knock the weapon out of your hands. Player only.", ReactionSection, "Weapon drop on arm wounds");
+        AddFloat("Client.WeaponDropOdds", WeaponDropRows, "Weapon drop odds (%)", 0f, 100f, 2f,
+            "Starting odds in percent. Bigger wounds compared with the arm's HP raise them, and hand or wrist hits count extra.", ReactionSection, "Weapon drop base odds percent");
+        AddBool("Client.WoundFall", WoundFallOn, false,
+            "A leg hit that leaves your leg below 35% HP can knock you prone. Player only.", ReactionSection, "Fall on leg wounds");
+        AddFloat("Client.WoundFallOdds", WoundFallRows, "Fall odds (%)", 0f, 100f, 25f,
+            "Starting odds in percent. Lower leg HP and bigger wounds raise them, and thigh hits count extra.", ReactionSection, "Fall base odds percent");
 
-        AddBool("Client.ProneLock", ProneLockOn, true, StanceSection, "Enable prone lock");
-        AddFloat("Client.ProneLockThreshold", StanceRows, "Prone lock leg HP (%)", 0f, 100f, 30f, StanceSection, "Prone lock leg HP threshold");
-        AddBool("Client.CrouchLock", CrouchLockOn, true, StanceSection, "Enable crouch lock");
-        AddFloat("Client.CrouchLockThreshold", StanceRows, "Crouch lock leg HP (%)", 0f, 100f, 15f, StanceSection, "Crouch lock leg HP threshold");
+        AddBool("Client.BulletPhysics", BulletPhysics, true,
+            "Turns HardcoreDMG's bullet changes on or off: fragmentation, armor penetration and ricochets.", BulletSection, "Bullet physics active");
+        AddFloat("Client.Fragmentation", BulletRows, "Fragmentation odds", 0.5f, 3f, 1.5f,
+            "Scales how often bullets break apart inside the target. Faster rounds fragment more. 1.00 = unchanged.", BulletSection, "Fragmentation odds scale");
+        AddFloat("Client.Penetration", BulletRows, "Penetration odds", 0.5f, 3f, 1.2f,
+            "Scales how often bullets get through armor. 1.00 = unchanged.", BulletSection, "Penetration odds scale");
+        AddFloat("Client.ArmorEnergyLoss", BulletRows, "Energy lost through armor", 0f, 1f, 0.4f,
+            "How much damage a weak round loses when it only just gets through armor. 0 = none, 0.40 = up to 40%, 1 = all of it.", BulletSection, "Energy lost through armor");
+        AddFloat("Client.Ricochet", BulletRows, "Ricochet odds", 0.5f, 3f, 1.3f,
+            "Scales how often bullets glance off at shallow angles. 1.00 = unchanged.", BulletSection, "Ricochet odds scale");
 
-        AddBool("Client.LegCripple", LegCrippleOn, true, CrippleSection, "Enable leg cripple");
-        AddBool("Client.LegCripplePlayer", LegCripplePlayer, false, CrippleSection, "Enable for player");
-        AddBool("Client.LegCrippleBots", LegCrippleBots, true, CrippleSection, "Enable for bots");
-        AddFloat("Client.CrawlSpeed", CrippleRows, "Crawl speed", 0.05f, 0.5f, 0.15f, CrippleSection, "Crawl speed");
-        AddFloat("Client.CrouchHealth", CrippleRows, "Forced crouch below leg HP", 0f, 0.9f, 0.2f, CrippleSection, "Crouch health threshold");
+        AddBool("Client.LegCripple", LegCrippleOn, false,
+            "Wounded legs force the actor into crouch, and badly wounded legs into prone. Everything below needs this on.", CrippleSection, "Enable leg cripple");
+        AddBool("Client.LegCrippleStayDown", LegCrippleStayDown, true,
+            "A crippled bot or player can't get back up past what their legs allow: they stay prone while both legs are below the prone threshold, and crouched while either leg is below the crouch threshold. They get up once healed or on painkillers.", CrippleSection, "Stay down until healed");
+        AddBool("Client.LegCripplePlayer", LegCripplePlayer, false,
+            "Leg cripple also limits you. Off = it only affects bots.", CrippleSection, "Enable for player");
+        AddBool("Client.LegCrippleBots", LegCrippleBots, true,
+            "Leg cripple affects AI bots (PMCs, scavs and so on).", CrippleSection, "Enable for bots");
+        AddFloat("Client.CrippleCrouchBelow", CrippleRows, "Crouch below leg HP (%)", 0f, 90f, 20f,
+            "When either leg drops below this share of its max HP, or is blacked, the actor is forced into crouch.", CrippleSection, "Crouch below leg HP percent");
+        AddFloat("Client.CrippleProneBelow", CrippleRows, "Prone below leg HP (%)", 0f, 90f, 10f,
+            "When both legs drop below this share of their max HP, the actor is forced prone. A blacked leg always counts as below it.", CrippleSection, "Prone below leg HP percent");
 
-        AddBool("Client.Shotguns", ShotgunsOn, true, ShotgunSection, "Shotgun rework active");
-        AddFloat("Client.ShotgunEnergy", ShotgunPelletRows, "Pellet energy model", 0f, 1f, 1.0f, ShotgunSection, "Pellet energy model");
-        _clusterBonus = AddFloat("Client.ShotgunCluster", ShotgunPelletRows, "Pellet cluster bonus", 0f, 1f, 0.3f, ShotgunSection, "Pellet cluster bonus");
-        _pointBlankRange = AddFloat("Client.ShotgunPointBlankRange", ShotgunRangeRows, "Point blank range (m)", 0f, 20f, 8f, ShotgunSection, "Point blank range meters");
-        _pointBlankBonus = AddFloat("Client.ShotgunPointBlankBonus", ShotgunRangeRows, "Point blank bonus", 1f, 2f, 1.25f, ShotgunSection, "Point blank damage bonus");
-        _effectiveRange = AddFloat("Client.ShotgunEffectiveRange", ShotgunRangeRows, "Effective range (m)", 10f, 60f, 25f, ShotgunSection, "Effective range meters");
-        _spreadFalloff = AddFloat("Client.ShotgunFalloff", ShotgunRangeRows, "Spread falloff exponent", 0f, 3f, 1.0f, ShotgunSection, "Spread falloff exponent");
-        _minRangeScale = AddFloat("Client.ShotgunMinRangeScale", ShotgunRangeRows, "Minimum range scale", 0.05f, 1f, 0.3f, ShotgunSection, "Minimum range scale");
-        AddFloat("Client.BuckshotBlunt", ShotgunArmorRows, "Buckshot blunt trauma", 0.5f, 3f, 1.25f, ShotgunSection, "Buckshot blunt trauma scale");
-        AddFloat("Client.SlugDamage", ShotgunArmorRows, "Slug damage", 0.5f, 2f, 1.15f, ShotgunSection, "Slug damage scale");
-        AddFloat("Client.SlugBlunt", ShotgunArmorRows, "Slug blunt trauma", 0.5f, 3f, 1.5f, ShotgunSection, "Slug blunt trauma scale");
+        AddBool("Client.Shotguns", ShotgunsOn, true,
+            "Reworks buckshot and slug damage: pellet energy, pattern spread with range, pellet count and armor. Needs the damage model active.", ShotgunSection, "Shotgun rework active");
+        AddFloat("Client.ShotgunEnergy", ShotgunPelletRows, "Pellet energy model", 0f, 1f, 1.0f,
+            "How far pellet and slug damage follows kinetic energy (speed squared) instead of the game's near-linear speed loss. 0 = vanilla, 1 = full energy model.", ShotgunSection, "Pellet energy model");
+        _clusterBonus = AddFloat("Client.ShotgunCluster", ShotgunPelletRows, "Pellet cluster bonus", 0f, 1f, 0.3f,
+            "Extra damage as more pellets from one shell hit the same target. The last pellet of a full hit gets the whole bonus, so a full hit averages half of it.", ShotgunSection, "Pellet cluster bonus");
+        _pointBlankRange = AddFloat("Client.ShotgunPointBlankRange", ShotgunRangeRows, "Point blank range (m)", 0f, 20f, 8f,
+            "Up to this distance the buckshot pattern is still one tight mass and gets the full point blank bonus.", ShotgunSection, "Point blank range meters");
+        _pointBlankBonus = AddFloat("Client.ShotgunPointBlankBonus", ShotgunRangeRows, "Point blank bonus", 1f, 2f, 1.25f,
+            "Buckshot pellet damage multiplier at point blank. Fades to 1.00 at the effective range.", ShotgunSection, "Point blank damage bonus");
+        _effectiveRange = AddFloat("Client.ShotgunEffectiveRange", ShotgunRangeRows, "Effective range (m)", 10f, 60f, 25f,
+            "Past this distance the pattern opens up and buckshot damage falls off.", ShotgunSection, "Effective range meters");
+        _spreadFalloff = AddFloat("Client.ShotgunFalloff", ShotgunRangeRows, "Spread falloff exponent", 0f, 3f, 1.0f,
+            "How fast buckshot falls off past the effective range: damage x (effective / distance) to this power. 0 = no falloff, 2 = inverse square.", ShotgunSection, "Spread falloff exponent");
+        _minRangeScale = AddFloat("Client.ShotgunMinRangeScale", ShotgunRangeRows, "Minimum range scale", 0.05f, 1f, 0.3f,
+            "The spread falloff never takes buckshot below this share of its damage.", ShotgunSection, "Minimum range scale");
+        AddFloat("Client.BuckshotBlunt", ShotgunArmorRows, "Buckshot blunt trauma", 0.5f, 3f, 1.25f,
+            "Scales the blunt damage of pellets stopped by armor.", ShotgunSection, "Buckshot blunt trauma scale");
+        AddFloat("Client.SlugDamage", ShotgunArmorRows, "Slug damage", 0.5f, 2f, 1.15f,
+            "Scales slug hits that get through. A slug is one heavy, wide projectile.", ShotgunSection, "Slug damage scale");
+        AddFloat("Client.SlugBlunt", ShotgunArmorRows, "Slug blunt trauma", 0.5f, 3f, 1.5f,
+            "Scales the blunt damage of slugs stopped by armor. A stopped slug still slams the plate.", ShotgunSection, "Slug blunt trauma scale");
 
         foreach (ScaleRow row in new[] { _clusterBonus, _pointBlankRange, _pointBlankBonus, _effectiveRange, _spreadFalloff, _minRangeScale })
             row.Changed += UpdateShotgunPreview;
 
+        // Options that only apply while their switch is on are grayed out otherwise.
+        DependsOn(WeaponDropOn, WeaponDropRows);
+        DependsOn(WoundFallOn, WoundFallRows);
+        DependsOn(LegCrippleOn, CrippleOptions);
+        DependsOn(PlayerDamageOn, PlayerDamageOptions);
+
         _builtInPresets = BuildBuiltInPresets();
     }
 
-    private void AddBool(string id, CheckBox box, bool def, string? section = null, string? key = null) =>
-        _bools.Add(new BoolSetting(id, box, def, section, key));
+    private readonly List<(CheckBox Master, FrameworkElement Options)> _dependents = new();
 
-    private ScaleRow AddFloat(string id, Panel panel, string label, float min, float max, float def,
+    private void DependsOn(CheckBox master, FrameworkElement options)
+    {
+        _dependents.Add((master, options));
+        master.Checked += (_, _) => UpdateDependents();
+        master.Unchecked += (_, _) => UpdateDependents();
+    }
+
+    private void UpdateDependents()
+    {
+        foreach ((CheckBox master, FrameworkElement options) in _dependents)
+        {
+            bool on = master.IsChecked == true;
+            options.IsEnabled = on;
+            options.Opacity = on ? 1.0 : 0.4;
+        }
+    }
+
+    private void AddBool(string id, CheckBox box, bool def, string tip, string? section = null, string? key = null)
+    {
+        SetTip(box, tip);
+        _bools.Add(new BoolSetting(id, box, def, section, key));
+    }
+
+    private ScaleRow AddFloat(string id, Panel panel, string label, float min, float max, float def, string tip,
                               string? section = null, string? key = null)
     {
-        ScaleRow row = ScaleRow.Add(panel, label, min, max);
+        ScaleRow row = ScaleRow.Add(panel, label, min, max, tip);
         _floats.Add(new FloatSetting(id, row, def, section, key));
         return row;
+    }
+
+    private static void SetTip(FrameworkElement element, string tip)
+    {
+        element.ToolTip = new TextBlock { Text = tip, TextWrapping = TextWrapping.Wrap, MaxWidth = 380 };
+        ToolTipService.SetShowDuration(element, 60000);
+        ToolTipService.SetInitialShowDelay(element, 300);
+        ToolTipService.SetShowOnDisabled(element, true);
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -267,6 +365,7 @@ public partial class MainWindow : Window
             s.Box.IsChecked = ReadCfgBool(lines, s.Key!, s.Default);
         foreach (FloatSetting s in _floats.Where(s => s.Section != null))
             s.Row.Value = ReadCfgFloat(lines, s.Key!, s.Default);
+        UpdateDependents();
     }
 
     private void SaveClientConfig()
@@ -274,6 +373,14 @@ public partial class MainWindow : Window
         try
         {
             string content = File.Exists(_clientCfgPath) ? File.ReadAllText(_clientCfgPath) : "";
+
+            // Drop settings that moved or were removed, so the plugin doesn't
+            // carry stale values over the ones saved here.
+            content = RemoveCfgSection(content, "2. Wound Reactions");
+            content = RemoveCfgSection(content, "4. Stance Lock");
+            content = RemoveCfgKey(content, CrippleSection, "Crawl speed");
+            content = RemoveCfgKey(content, CrippleSection, "Crouch health threshold");
+
             foreach (BoolSetting s in _bools.Where(s => s.Section != null))
                 content = SetCfgValue(content, s.Section!, s.Key!, Bool(s.Box));
             foreach (FloatSetting s in _floats.Where(s => s.Section != null))
@@ -338,6 +445,39 @@ public partial class MainWindow : Window
         if (lineEnd < 0) lineEnd = content.Length;
         if (lineEnd > lineStart && content[lineEnd - 1] == '\r') lineEnd--;
         return content.Substring(0, lineStart) + keyLine + content.Substring(lineEnd);
+    }
+
+    /// <summary>
+    /// Removes [section] and everything up to the next section. The header must
+    /// match exactly, so "[2. Wound Reactions]" leaves "[2. Wound Reactions (Player)]" alone.
+    /// </summary>
+    private static string RemoveCfgSection(string content, string section)
+    {
+        string header = "[" + section + "]";
+        int start = content.IndexOf(header, StringComparison.Ordinal);
+        if (start < 0) return content;
+
+        int end = content.IndexOf("\n[", start + header.Length, StringComparison.Ordinal);
+        return end < 0 ? content.Substring(0, start) : content.Remove(start, end + 1 - start);
+    }
+
+    /// <summary>
+    /// Removes the "key = value" line inside [section]. Its comment lines stay
+    /// until BepInEx next rewrites the file.
+    /// </summary>
+    private static string RemoveCfgKey(string content, string section, string key)
+    {
+        int sectionIdx = content.IndexOf("[" + section + "]", StringComparison.Ordinal);
+        if (sectionIdx < 0) return content;
+
+        int nextSection = content.IndexOf("\n[", sectionIdx + 1, StringComparison.Ordinal);
+        if (nextSection < 0) nextSection = content.Length;
+
+        int keyIdx = content.IndexOf("\n" + key + " =", sectionIdx, StringComparison.OrdinalIgnoreCase);
+        if (keyIdx < 0 || keyIdx > nextSection) return content;
+
+        int lineEnd = content.IndexOf('\n', keyIdx + 1);
+        return lineEnd < 0 ? content.Substring(0, keyIdx) : content.Remove(keyIdx, lineEnd - keyIdx);
     }
 
     // ==================== Shotguns ====================
@@ -424,13 +564,13 @@ public partial class MainWindow : Window
         BuiltIn("HardcoreDMG default", "The mod's own defaults: lethal but fair, with the shotgun rework on."),
         BuiltIn("Lifelike", "Closer to real wounding: deadlier heads and heavy bleeds, shotguns that hit harder up close and fade faster at range, slugs that hurt through armor.",
             ("Client.DamageScale", 1.1), ("Client.HeadshotScale", 1.4), ("Client.HeavyBleed", 1.3),
-            ("Client.WeaponDrop", true), ("Client.LegCripplePlayer", true),
+            ("Client.WeaponDrop", true), ("Client.LegCripple", true), ("Client.LegCripplePlayer", true), ("Client.WoundFall", true),
             ("Client.ShotgunPointBlankBonus", 1.35), ("Client.ShotgunCluster", 0.4), ("Client.ShotgunFalloff", 1.5),
             ("Client.SlugDamage", 1.25), ("Client.SlugBlunt", 1.75)),
         BuiltIn("Hardcore", "Everyone dies fast, you included: more damage, more bleeding, softer bots and less player HP.",
             ("Client.DamageScale", 1.3), ("Client.HeadshotScale", 1.6), ("Client.HeavyBleed", 1.6), ("Client.LightBleed", 1.3),
             ("Toughness.Regulars", 0.7), ("Toughness.Elites", 0.8), ("Toughness.Bosses", 1.1), ("PlayerVitality", 0.85),
-            ("Client.WeaponDrop", true), ("Client.WeaponDropOdds", 4), ("Client.LegCripplePlayer", true),
+            ("Client.WeaponDrop", true), ("Client.WeaponDropOdds", 4), ("Client.LegCripple", true), ("Client.LegCripplePlayer", true), ("Client.WoundFall", true),
             ("Client.ShotgunPointBlankBonus", 1.4), ("Client.ShotgunCluster", 0.45)),
         BuiltIn("Forgiving", "More room for mistakes: more player HP, less bleeding, tougher bots and milder shotguns.",
             ("Client.DamageScale", 0.85), ("Client.HeadshotScale", 0.9), ("Client.HeavyBleed", 0.7), ("Client.LightBleed", 0.8),
@@ -791,6 +931,7 @@ public partial class MainWindow : Window
     {
         foreach (BoolSetting s in _bools) s.Box.IsChecked = s.Default;
         foreach (FloatSetting s in _floats) s.Row.Value = s.Default;
+        UpdateDependents();
     }
 
     // ==================== Helpers ====================
@@ -874,7 +1015,7 @@ public partial class MainWindow : Window
             }
         }
 
-        public static ScaleRow Add(Panel panel, string label, float min, float max)
+        public static ScaleRow Add(Panel panel, string label, float min, float max, string tip)
         {
             var grid = new Grid { Margin = new Thickness(0, 4, 0, 0) };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) });
@@ -889,6 +1030,7 @@ public partial class MainWindow : Window
             grid.Children.Add(text);
             grid.Children.Add(slider);
             grid.Children.Add(box);
+            SetTip(grid, tip);
             panel.Children.Add(grid);
 
             var row = new ScaleRow(slider, box);

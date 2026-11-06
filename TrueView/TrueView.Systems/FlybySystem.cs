@@ -36,7 +36,7 @@ internal static class FlybySystem
     private static bool _loaded;
     private static GameObject _root;
     private static AudioSource[] _sources;
-    private static int _nextSource, _lastTake = -1;
+    private static int _lastTake = -1;
 
     private static float _pendingPan, _pendingAt = -1f;
     private static float _flinchAt = -1f, _flinchSide, _flinchCloseness;
@@ -109,13 +109,17 @@ internal static class FlybySystem
             t.Clip.SetData(t.Data, 0);
         }
 
-        AudioSource s = _sources[_nextSource];
-        _nextSource = (_nextSource + 1) % _sources.Length;
+        // One whiz at a time: a closer round cuts off a fainter whiz, a fainter
+        // one is skipped while a louder one is still going.
+        AudioSource s = _sources[0];
+        float loud = Mathf.Clamp01(volume * Mathf.Lerp(0.3f, 1f, closeness));
+        if (s.isPlaying && s.volume >= loud)
+            return "skipped (louder whiz playing)";
         s.Stop();
         s.clip = t.Clip;
         s.panStereo = pan;
         s.pitch = UnityEngine.Random.Range(0.92f, 1.08f);
-        s.volume = Mathf.Clamp01(volume * Mathf.Lerp(0.3f, 1f, closeness));
+        s.volume = loud;
         s.Play();
         return t.Name;
     }
@@ -127,8 +131,8 @@ internal static class FlybySystem
         if (cam == null) return false;
         _root = new GameObject("TrueView_Flyby");
         _root.transform.SetParent(cam.transform, false);
-        // A few voices so a burst of rounds overlaps instead of cutting itself off.
-        _sources = new AudioSource[4];
+        // A single voice: whizzes never stack (see PlayWhiz).
+        _sources = new AudioSource[1];
         for (int i = 0; i < _sources.Length; i++)
         {
             var s = _root.AddComponent<AudioSource>();

@@ -67,7 +67,7 @@ internal partial class NmBody
             else if (FromRest(bind, restPos, restRot, ref why))
             {
                 bind.Source = "bind pose" + (_restFromLive > 0 ? $" ({_restFromLive} bone(s) without one: taken from their live pose under a bound parent{(_legsFromLive ? ", legs while standing" : "")})" : "")
-                              + (bind.SpineFitted ? ", spine fitted along SPT's spine" : "");
+                              + (bind.SpineFitted ? ", spine fitted along SPT's spine" : "") + _bindNote;
                 bind.Valid = true;
                 if (_legsFromLive)
                 {
@@ -115,6 +115,12 @@ internal partial class NmBody
         _restFromLive = 0;
         _legsFromLive = false;
         var bindWorld = new Dictionary<Transform, Matrix4x4>();
+        // which mesh gave each mapped bone its bind pose, and how far other meshes skinning it disagree
+        // (logged when the binding fails its skeleton check)
+        var mapped = new HashSet<Transform>();
+        foreach (Transform b in _bones) if (b != null) mapped.Add(b);
+        var from = new Dictionary<Transform, string>();
+        var others = new Dictionary<Transform, (int n, float deg)>();
         try
         {
             foreach (SkinnedMeshRenderer smr in _p.GetComponentsInChildren<SkinnedMeshRenderer>(true))
@@ -126,10 +132,29 @@ internal partial class NmBody
                 if (bp == null || bp.Length != bones.Length) continue;
                 Matrix4x4 root = smr.transform.localToWorldMatrix;
                 for (int i = 0; i < bones.Length; i++)
-                    if (bones[i] != null && !bindWorld.ContainsKey(bones[i])) bindWorld[bones[i]] = root * bp[i].inverse;
+                {
+                    if (bones[i] == null) continue;
+                    Matrix4x4 m = root * bp[i].inverse;
+                    if (!bindWorld.TryGetValue(bones[i], out Matrix4x4 first))
+                    {
+                        bindWorld[bones[i]] = m;
+                        if (mapped.Contains(bones[i])) from[bones[i]] = smr.name;
+                        continue;
+                    }
+                    if (!mapped.Contains(bones[i])) continue;
+                    float apart = Quaternion.Angle(Quaternion.LookRotation(first.GetColumn(2), first.GetColumn(1)), Quaternion.LookRotation(m.GetColumn(2), m.GetColumn(1)));
+                    others.TryGetValue(bones[i], out var o);
+                    others[bones[i]] = (o.n + 1, Mathf.Max(o.deg, apart));
+                }
             }
         }
         catch (Exception e) { why = "bind poses unreadable (" + e.GetType().Name + ")"; return false; }
+        for (int k = 0; k < Parts; k++)
+        {
+            Transform b = _bones[k];
+            _bindMesh[k] = b == null ? "-" : !from.TryGetValue(b, out string s) ? "none (live pose)"
+                         : others.TryGetValue(b, out var o) ? $"{s} (+{o.n} more mesh(es), up to {o.deg:F0} deg apart)" : s;
+        }
 
         var missing = new List<string>();
         for (int k = 0; k < Parts; k++)
@@ -508,6 +533,7 @@ internal partial class NmBody
             bind.P[k] = inv * (partRestPos - restPos[k]);
             bind.Has[k] = true;
         }
+        VerifyBinding(bind, bPos, bRot, bJoint);
         return true;
     }
 

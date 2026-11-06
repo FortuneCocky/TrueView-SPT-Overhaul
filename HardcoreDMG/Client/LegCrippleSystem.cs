@@ -7,22 +7,23 @@ using UnityEngine;
 namespace HardcoreDMGClient;
 
 /// <summary>
-/// Realistic leg crippling for both players and bots.
+/// Leg crippling for both players and bots.
 ///
-/// When leg health drops below the crouch threshold:
+/// When either leg drops below the crouch threshold (or is blacked):
 /// - The actor is forced into crouch position
 /// - Sprinting is disabled
 ///
-/// When both legs are blacked out (0 HP):
-/// - The actor is forced into prone (crawl) position
-/// - Movement speed is heavily reduced
+/// When both legs drop below the prone threshold (a blacked leg always counts):
+/// - The actor is forced into prone and crawls at the game's prone speed
 /// - Sprinting is disabled
-/// - The actor cannot stand until at least one leg is healed
 ///
-/// Painkillers temporarily mask the damage.
+/// With "Stay down until healed", the actor also can't stand back up past
+/// what its legs allow (see CrippleLevel). Painkillers temporarily mask it all.
 /// </summary>
 internal static class LegCrippleSystem
 {
+    public enum Cripple { None, Crouch, Prone }
+
     // Per-actor state — keyed by player instance
     private static readonly Dictionary<Player, CrippleState> _states = new();
 
@@ -58,22 +59,11 @@ internal static class LegCrippleSystem
         if (allPlayers == null)
             return;
 
-        Player localPlayer = null;
         foreach (Player p in allPlayers)
         {
-            if (p == null) continue;
-            if (p.IsYourPlayer)
-            {
-                localPlayer = p;
-                continue;
-            }
-
-            if (HardcoreDMGPlugin.LegCrippleEnableBots.Value)
-                ProcessPlayer(p, dt);
+            if (p != null && AppliesTo(p))
+                ProcessPlayer(p);
         }
-
-        if (localPlayer != null && HardcoreDMGPlugin.LegCrippleEnablePlayer.Value)
-            ProcessPlayer(localPlayer, dt);
 
         // Clean up dead/removed actors
         if (_states.Count > 0)
@@ -82,20 +72,53 @@ internal static class LegCrippleSystem
             foreach (var kvp in _states)
             {
                 if (kvp.Key == null || kvp.Key.HealthController == null || !kvp.Key.HealthController.IsAlive)
-                {
                     toRemove.Add(kvp.Key);
-                }
             }
             foreach (var p in toRemove)
-            {
                 _states.Remove(p);
-            }
         }
     }
 
-    private static void ProcessPlayer(Player player, float dt)
+    private static bool AppliesTo(Player player) =>
+        player.IsYourPlayer ? HardcoreDMGPlugin.LegCrippleEnablePlayer.Value : HardcoreDMGPlugin.LegCrippleEnableBots.Value;
+
+    /// <summary>
+    /// What the actor's legs allow right now, from the two thresholds. A
+    /// blacked leg counts as below both. Ignores painkillers and the toggles.
+    /// </summary>
+    private static Cripple LegLimit(Player player)
     {
-        if (player == null) return;
+        float crouchBelow = HardcoreDMGPlugin.LegCrippleCrouchBelow.Value / 100f;
+        float proneBelow = HardcoreDMGPlugin.LegCrippleProneBelow.Value / 100f;
+
+        bool leftBlacked = IsBodyPartDestroyed(player, EBodyPart.LeftLeg);
+        bool rightBlacked = IsBodyPartDestroyed(player, EBodyPart.RightLeg);
+        float left = leftBlacked ? 0f : GetBodyPartHealthFraction(player, EBodyPart.LeftLeg);
+        float right = rightBlacked ? 0f : GetBodyPartHealthFraction(player, EBodyPart.RightLeg);
+
+        if ((leftBlacked || left < proneBelow) && (rightBlacked || right < proneBelow))
+            return Cripple.Prone;
+        if (leftBlacked || rightBlacked || left < crouchBelow || right < crouchBelow)
+            return Cripple.Crouch;
+        return Cripple.None;
+    }
+
+    /// <summary>
+    /// How far "Stay down until healed" keeps this actor down: None when it
+    /// doesn't apply (leg cripple or the option off, the actor not covered,
+    /// or on painkillers), otherwise the limit its legs set.
+    /// </summary>
+    public static Cripple CrippleLevel(Player player)
+    {
+        if (player == null || !HardcoreDMGPlugin.EnableLegCripple.Value || !HardcoreDMGPlugin.LegCrippleStayDown.Value)
+            return Cripple.None;
+        if (!AppliesTo(player) || IsOnPainkillers(player))
+            return Cripple.None;
+        return LegLimit(player);
+    }
+
+    private static void ProcessPlayer(Player player)
+    {
         if (player.HealthController == null || !player.HealthController.IsAlive) return;
         if (player.MovementContext == null) return;
 
@@ -105,68 +128,27 @@ internal static class LegCrippleSystem
             _states[player] = state;
         }
 
-        bool leftLegBlacked = IsBodyPartDestroyed(player, EBodyPart.LeftLeg);
-        bool rightLegBlacked = IsBodyPartDestroyed(player, EBodyPart.RightLeg);
-        bool bothLegsBlacked = leftLegBlacked && rightLegBlacked;
+        // Painkillers mask everything — restore normal movement
+        Cripple limit = IsOnPainkillers(player) ? Cripple.None : LegLimit(player);
 
-        bool onPainkillers = IsOnPainkillers(player);
-
-        if (onPainkillers)
+        switch (limit)
         {
-            // Painkillers mask everything — restore normal movement
-            if (state.WasCrouching || state.WasForcedProne)
-            {
-                RestoreMovement(player, state);
-            }
-            return;
-        }
-
-        if (bothLegsBlacked)
-        {
-            // Both legs blacked — force prone/crawl
-            if (!state.WasForcedProne)
-            {
-                ForceProne(player);
-                state.WasForcedProne = true;
-                state.WasCrouching = false;
-            }
-            else
-            {
-                MaintainProne(player);
-            }
-        }
-        else if (leftLegBlacked || rightLegBlacked)
-        {
-            // One leg blacked — force crouch
-            if (state.WasForcedProne)
-            {
-                // Was prone, now only one leg blacked — allow standing up
-                state.WasForcedProne = false;
-            }
-            if (!state.WasCrouching)
-            {
-                ForceCrouch(player);
-                state.WasCrouching = true;
-            }
-            else
-            {
-                MaintainCrouch(player);
-            }
-        }
-        else
-        {
-            // No legs blacked — check low health crouch
-            float threshold = HardcoreDMGPlugin.LegCrippleCrouchHealthThreshold.Value;
-            bool leftLowHealth = GetBodyPartHealthFraction(player, EBodyPart.LeftLeg) < threshold;
-            bool rightLowHealth = GetBodyPartHealthFraction(player, EBodyPart.RightLeg) < threshold;
-
-            if (leftLowHealth && rightLowHealth)
-            {
-                // Both legs low health — force crouch
-                if (state.WasForcedProne)
+            case Cripple.Prone:
+                if (!state.WasForcedProne)
                 {
-                    state.WasForcedProne = false;
+                    ForceProne(player);
+                    state.WasForcedProne = true;
+                    state.WasCrouching = false;
                 }
+                else
+                {
+                    MaintainProne(player);
+                }
+                break;
+
+            case Cripple.Crouch:
+                // Was prone, legs now only limit to crouch — allow getting up to crouch
+                state.WasForcedProne = false;
                 if (!state.WasCrouching)
                 {
                     ForceCrouch(player);
@@ -176,15 +158,12 @@ internal static class LegCrippleSystem
                 {
                     MaintainCrouch(player);
                 }
-            }
-            else
-            {
-                // Legs are fine — restore normal movement
+                break;
+
+            default:
                 if (state.WasCrouching || state.WasForcedProne)
-                {
                     RestoreMovement(player, state);
-                }
-            }
+                break;
         }
     }
 
@@ -236,7 +215,7 @@ internal static class LegCrippleSystem
     }
 
     /// <summary>
-    /// Force the actor into prone position and limit movement.
+    /// Force the actor into prone position.
     /// </summary>
     private static void ForceProne(Player player)
     {
@@ -254,17 +233,10 @@ internal static class LegCrippleSystem
             mc.EnableSprint(false);
         }
         catch { }
-
-        try
-        {
-            float crawlSpeed = HardcoreDMGPlugin.LegCrippleCrawlSpeed.Value;
-            mc.SetCharacterMovementSpeed(crawlSpeed, true);
-        }
-        catch { }
     }
 
     /// <summary>
-    /// Keep the actor in prone position while both legs are blacked.
+    /// Keep the actor in prone position while its legs are below the prone threshold.
     /// </summary>
     private static void MaintainProne(Player player)
     {
@@ -285,16 +257,6 @@ internal static class LegCrippleSystem
             if (mc.IsSprintEnabled)
             {
                 mc.EnableSprint(false);
-            }
-        }
-        catch { }
-
-        try
-        {
-            float crawlSpeed = HardcoreDMGPlugin.LegCrippleCrawlSpeed.Value;
-            if (mc.CharacterMovementSpeed > crawlSpeed * 1.1f)
-            {
-                mc.SetCharacterMovementSpeed(crawlSpeed, true);
             }
         }
         catch { }

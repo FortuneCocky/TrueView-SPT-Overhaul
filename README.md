@@ -29,14 +29,16 @@ Your weapon stops being glued to the centre of the screen.
 - **Camera lag.** Your head trails the weapon instead of being bolted to it.
 - **Recoil that misaligns.** Every shot knocks the gun off target, and tired arms make it worse.
 - **Hand kick.** In hip fire, each shot kicks the gun up and back around your grip, and it settles in about a tenth of a second.
-- **One recoil switch.** "Disable TrueView recoil" turns off every recoil effect TrueView adds (shot jolt, hand kick, misalignment) and keeps only the game's own recoil.
+- **One Recoil section.** "Disable TrueView recoil" turns off every recoil effect TrueView adds (shot jolt, hand kick, misalignment) and keeps only the game's own recoil. Two sliders scale the game's own recoil: one for hip fire and one for firing from a Tactical Stances pose.
+- **Sane animation speeds.** Reloads, weapon draws and malfunction clears can't play at extreme speeds, whatever skills, guns or other mods stack up. Anything the game itself can reach plays unchanged.
 - **Collision-aware ADS.** The gun pulls back near walls instead of clipping through them.
 - **Barrel alignment (optional, off by default).** In hip fire, lines the barrel up with where the deadzone is aiming, so shots go where the gun is pointed on screen, the same on every weapon.
 - **Magnified scopes.** Looking through a 2x or stronger optic hands the gun, view and sway back to the game, so the scope picture stays steady and attached to the lens. At the hip, a mounted scope rides a little lower so it doesn't cover your view.
 
 ## 🏃 TrueView — body and camera
 
-- **Body camera.** The view rides your chest like a bodycam: it trails a little behind turns, rolls with each uneven footstep, jolts with every shot without climbing, knocks back on hits and near misses, drifts when you're hurt and rises and falls with your breathing. It only moves what you see, so your gun, aim and deadzone are never thrown off, and it fades out while aiming.
+- **Body camera.** The view rides your chest like a bodycam: it trails a little behind turns, rolls with each uneven footstep, jolts with every shot without climbing, knocks back on hits and near misses, drifts when you're hurt and rises and falls with your breathing. It only moves what you see, so your gun, aim and deadzone are never thrown off, and it fades out while aiming. You can mount it higher or lower on your chest, let your chest follow the gun, turn off its stabilisation and add a bump from the stock on each shot.
+- **Camera lens.** A bodycam-style lens: slight fisheye, dark rounded edges, colour fringing at the edges and an optional mask frame while wearing a gas mask or full balaclava. Every part has its own switch and strength in 12 - Camera Lens.
 - **Momentum.** Speed builds up as your body pushes off: about 0.3 s to a walk, 0.45 s to a run and 0.65 s into a sprint, longer when you're loaded, tired or hurt. Changing direction brakes first. It never makes you faster than the game would.
 - **Start, stop and strafe lean.** Your head leans into a move as you get going, tips into the brake when you stop and rolls into strafes. Turns bank your body, and Q/E lean is real.
 - **Turn-in-place footwork.** Small turns twist your torso. Bigger ones make your feet step, with a weight-scaled dip. Heavy gear makes the step slower and heavier.
@@ -48,7 +50,7 @@ Your weapon stops being glued to the centre of the screen.
 
 - **Adrenaline.** Taking hits or hearing gunfire nearby raises adrenaline. It causes a slight hand tremor and a tunnel-vision pinch, then decays over several seconds. Being shot at brings a soft, slow heartbeat you feel in your chest; getting hit spikes it to a loud, fast one that slows down as you calm.
 - **Near misses.** A round passing close makes you flinch away from the side it passed, harder the closer it came, and raises adrenaline. Custom whiz sounds can replace the game's flyby sound.
-- **Breathing.** You hear and feel breathing that matches your stamina, from calm nose breathing to heavy panting after a sprint. Holding your breath takes a breath in and silences it; letting go blows it out, harder after a long hold.
+- **Breathing.** You hear and feel breathing that matches your stamina, from calm nose breathing to heavy panting after a sprint. Holding your breath takes a breath in and silences it; letting go blows it out, harder after a long hold. Under a gas mask it sounds muffled through the mask, and sprint and exhausted breathing each have their own volume.
 - **Calming down.** After a fight, heavy breathing slowly settles into nose breathing: a short calm-down after a distant shot, a long one after a real firefight. A fresh hit or nearby fire cuts straight back to heavy breathing.
 - **Injuries matter.** Wounded arms shake and slow your handling. Crippled legs force a limp.
 - **Tired arms.** Sway grows as arm stamina drains, steeply near empty, and below about a third your arms start to tremble. Holding your breath steadies them.
@@ -76,9 +78,10 @@ Carry your weapon like an operator instead of always having it shouldered.
 - **Trigger discipline (optional).** Blocks firing in Low or High Ready so stances actually matter.
 - **Lean shoulder swap.** The weapon moves to your left shoulder when you lean left.
 - **Pistol stances.** Sidearms get their own poses.
-- **Weapon swap speed.** Drawing a gun takes longer the heavier it is as carried, with its attachments, mag and ammo.
+- **Weapon swap speed.** Drawing a gun takes longer the heavier it is as carried, with its attachments, mag and ammo. It never goes past the game's own fastest draw, and reloads always play at normal speed.
 - **Arm stamina.** Holding a stance drains or restores stamina based on weapon weight. LMGs are heavy, pistols are cheap.
-- **Stance bonuses.** Each stance has its own configurable perks (sprint acceleration, move speed, ADS move speed, recoil).
+- **Stance bonuses.** Each stance has its own configurable perks (sprint acceleration, move speed, ADS move speed). Recoil while firing from a stance is set in TrueView's Recoil section.
+- **Stance presets.** Save every stance position as a named preset in F12 (m - Presets), then switch, rename or share them. They're stored as plain text in `BepInEx/config/com.devin.tacticalstances.presets.txt`.
 - **Your stance is remembered** between raids.
 - **Scope clearance.** When you're not aiming, a big optic that would cover the middle of your screen pushes the gun down until your view is clear, in any stance. Prone, the scope is held against the game's turn-away pull.
 
@@ -102,7 +105,7 @@ Depth of field that behaves like your eyes. It uses the game's own post-processi
 Blood that is actual 3D geometry, not flat sprites. Every drop collides with the world and stays where it lands. It was written from scratch for performance: each effect type is drawn as one shared mesh (a single draw call), with fixed budgets so nothing piles up.
 
 **On the hit**
-- **Exit spurts and ribbons.** Blood pours from wounds as one continuous rope of liquid that sags, thins, pinches off into beads and peels off side strands. Where it lands it pools, streaks along the floor or runs down the wall.
+- **Exit spurts.** Blood leaves wounds as a shower of separate drops that break up as they fall. Each one splats where it lands, with smaller satellite drops, and heavy flow gathers into pools or runs down the wall.
 - **Headshots** throw forked ribbons sideways across your view, with a dense cloud of drops. Close to a wall, they paint it with layered spatter, a dark core and drips that creep down for seconds.
 - **Brain matter.** Headshots can throw glossy chunks and skull chips that tumble, splat and slide down walls.
 - **Head dismemberment.** A killing headshot can take off half the face or the whole head, leaving a ragged wound or neck stump that pumps and drips. Helmets, masks and glasses fly off as separate pieces. It's visual only: the real items stay on the body.
@@ -123,7 +126,7 @@ Blood that is actual 3D geometry, not flat sprites. Every drop collides with the
 - **Dragging.** Hold interact on a body to drag it. A bleeding body smears blood along the floor behind it, with a quiet scrape.
 
 **On the body**
-- **Bullet wounds** are real size: a dark wet hole with a ragged ring of torn flesh, some with a trickle running down.
+- **Bullet wounds** are real size: a dark hole in a wide, torn burst of flesh, with a thick trickle that runs down over a few seconds.
 - **Armor hits** leave a grey and black mark instead of blood: punch mark, cracks and grainy dust.
 - **Wrapped onto the character.** Wounds and armor marks are cut from the character's own model, so they wrap over plates, pouches, folds and skin and move with the body.
 
@@ -141,7 +144,7 @@ Bots react to being shot with their whole body, driven by a real-time physics si
 
 **Getting hit**
 - **Stumbles.** A solid hit hands the bot to physics. He takes real steps (his feet don't skate), buckles, staggers, and either rights himself or goes over. How long a stumble can last is a preset (Short, Natural, Long) or your own range.
-- **Balance presets.** Engine, Tough, Classic or Natural set how hard he fights to stay up.
+- **Toughness.** One stagger style with a Toughness setting (Tough, Natural or Easy) for how often a hit takes him down. The physics decides who falls.
 - **The gun stays in his hand.** It's held by its own grip point the whole time, so it never floats off while he stumbles or falls.
 - **He catches himself.** A bot that starts falling while still upright may plant a foot or a hand and recover. A wall or a knee already down sends him over anyway.
 - **Hit nudges.** Every hit that doesn't start a stumble still rocks the body where it landed: the chest rocks, the head whips, a knee dips.
@@ -163,7 +166,8 @@ Bots react to being shot with their whole body, driven by a real-time physics si
 - **Fall damage.** Crashing into the ground or a wall hurts a living bot.
 
 **Deaths**
-- **Death falls.** Lethal hits carry the body down limp, under physics, until it settles.
+- **Death falls.** Lethal hits carry the body down limp, under physics, until it settles. The hands go limp too, instead of staying clawed around a gun that isn't there.
+- **Kills count.** A bot finished off by a fall or crash is credited to whoever shot him.
 - **Agony.** Some lethal torso hits become a long death: stagger, collapse, writhing on the ground. Then the normal ragdoll takes over.
 
 **Fair and stable**
@@ -190,20 +194,21 @@ A deadlier, more anatomical damage model. It has a server part (body HP) and a c
 - **Shotgun rework.** Pellets carry real energy: devastating point blank, fading with spread and range, and tighter clusters hit harder. Buckshot and slugs each have their own blunt trauma through armor.
 
 **Wounds**
-- **Falls on leg wounds.** A badly hurt leg can drop a bot to the ground.
-- **Stance lock.** A bot with shattered legs can't get up from crouch or prone until they're healed.
-- **Leg cripple.** Bots with ruined legs crawl.
-- **Optional for you:** the leg effects can apply to you too, and a bad arm wound can make you drop your weapon. Both are off by default.
+- **Leg cripple.** Wounded legs force bots into a crouch, and badly wounded legs into prone, and they stay down until healed. It can apply to you too.
+- **Falls on leg wounds (you).** A bad leg hit can knock you prone.
+- **Weapon drop (you).** A bad arm wound can knock the weapon out of your hands.
+- All three are off by default. The Lifelike and Hardcore presets switch them on.
+- **Your own damage.** An optional Damage (Player) tab sets how hard hits and bleeds are on you, separately from bots.
 
-**Config Editor.** `SPT/user/mods/HardcoreDMG/HardcoreDMG Config Editor.exe` edits the server and client settings in one window, with built-in presets and presets you can share.
+**Config Editor.** `SPT_Runtime/user/mods/HardcoreDMG/HardcoreDMG Config Editor.exe` edits the server and client settings in one window, with built-in presets and presets you can share. Every setting has a hover description.
 
 ---
 
 ## 📦 Install
 
 1. Download the latest zip from [Releases](https://github.com/FortuneCocky/TrueView-SPT-Overhaul/releases).
-2. Extract it into your **SPT root folder** (the one with `EscapeFromTarkov.exe`) and merge the `BepInEx` and `SPT` folders. HardcoreDMG's server mod goes to `SPT/user/mods/HardcoreDMG`; if your server folder has another name, put it in that folder's `user/mods`.
-3. Restart the SPT server and launch the game once to generate the configs:
+2. Open your **SPT folder** (the one with `EscapeFromTarkov.exe`) and drag the zip's `BepInEx` and `SPT_Runtime` folders into it. Say yes when Windows asks to merge folders or replace files.
+3. Start the SPT server and the game as usual. Updating works the same way, and your settings are kept. The configs are created on first launch:
    - `BepInEx/config/com.trueview.cfg`
    - `BepInEx/config/com.devin.tacticalstances.cfg`
    - `BepInEx/config/com.dynamicdof.prism.cfg`
@@ -211,9 +216,11 @@ A deadlier, more anatomical damage model. It has a server part (body HP) and a c
    - `BepInEx/config/com.euphoria.reaction.cfg`
    - `BepInEx/config/com.devin.hardcoredmg.client.cfg`
 
-Every client setting can also be changed in game through the **BepInEx Configuration Manager (F12)**. HardcoreDMG's server settings are in `SPT/user/mods/HardcoreDMG/config.jsonc` or its Config Editor.
+Every client setting can also be changed in game through the **BepInEx Configuration Manager (F12)**. HardcoreDMG's server settings are in `SPT_Runtime/user/mods/HardcoreDMG/config.jsonc` or its Config Editor.
 
-To play without HardcoreDMG, delete `SPT/user/mods/HardcoreDMG` and `BepInEx/plugins/HardcoreDMG`.
+To leave a mod out, delete its folder in `BepInEx/plugins`. HardcoreDMG also has a server part in `SPT_Runtime/user/mods/HardcoreDMG`.
+
+If you use LensRL, remove `LensRL.dll`: TrueView has the lens built in now and keeps its own lens off while LensRL is installed.
 
 ## ✅ Compatibility
 

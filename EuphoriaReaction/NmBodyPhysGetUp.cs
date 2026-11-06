@@ -49,6 +49,19 @@ internal partial class NmBody
     private float _pguGap;                    // m the doll's pelvis is behind the clip's
     private readonly Vector3[] _pguOffPos = new Vector3[Parts];
     private readonly Quaternion[] _pguOffRot = new Quaternion[Parts];
+    // From 2026-11-01 every get-up blew up in its first frames (65-155 m/s, "runaway") and he snapped up to
+    // stand with no clip: the assist pulled towards a target this get-up hadn't set yet (a stale or zero one,
+    // metres away). So no pull before this get-up's first target; a target far off the doll or a runaway
+    // hands the clip on alone (PhysGetUpFallBack), and the fastest part after the step and after the assist
+    // is kept for the log.
+    private const float PguLostGap = 1.5f;    // m: the clip's pelvis this far off the doll's is no target
+    private int _pguTargets, _pguDiag;
+    private string _pguLost;
+    private float _pguPreMax, _pguPostMax;
+    private int _pguPreK, _pguPostK;
+    // For the log: s on the ground before the get-up, s lost to the clip slowing for the doll, the furthest
+    // the doll's pelvis fell behind (m), and s in when the clip reached its stand.
+    private float _pguDown, _pguSlowed, _pguGapMax, _pguStood;
 
     private static bool PhysGetUpOn => EuphoriaPlugin.Instance?.PhysGetUp.Value ?? true;
 
@@ -61,6 +74,9 @@ internal partial class NmBody
         if (g == null) return false;
         _pguBind = b; _pguGeom = g;
         _pgu = true; _pguHave = false; _pguAlive = false; _pguOffSet = false; _pguGap = 0f;
+        _pguTargets = 0; _pguDiag = 0; _pguLost = null; _pguPreMax = _pguPostMax = 0f;
+        _pguDown = _downSince > 0f ? Time.time - _downSince : 0f;
+        _pguSlowed = _pguGapMax = _pguStood = 0f;
         _pguStart = Time.time;
         _matching = false; _matchFadeFrom = 0f;
         for (int k = 0; k < Parts; k++) if (_bones[k] != null) _blendRot[k] = _bones[k].rotation;
@@ -85,6 +101,7 @@ internal partial class NmBody
         if (!_pgu) return false;
         GetUpClip clip = _getUp;
         if (clip == null) { _pgu = false; return false; }
+        if (_pguLost != null) { PhysGetUpFallBack(_pguLost); return true; }
         if (_lastHitAt > _pguStart)
         {
             PhysGetUpStop("hit");
@@ -108,7 +125,10 @@ internal partial class NmBody
             StartPose to = _recoverTarget == StartPose.Prone ? StartPose.Stand : _recoverTarget; // his recover stance (NmBodyPhase)
             ApplyStance(to);
             _blendDur = to == StartPose.Stand || _guWarpAt > 0f ? 0.35f : 0.8f; // a crouch not warped into sinks in over a longer blend
-            EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} physical get-up finished{(late ? " (timed out)" : "")} - back to animation ({to.ToString().ToLowerInvariant()})");
+            EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} physical get-up finished{(late ? " (timed out)" : "")} - back to animation ({to.ToString().ToLowerInvariant()}); " +
+                               $"{_pguDown:F1} s on the ground first, up at {(_pguStood > 0f ? _pguStood.ToString("F1") : "-")} s and done at {Time.time - _pguStart:F1} s " +
+                               $"(the clip alone: up at {clip.StandFrame / (clip.Fps * speed):F1} s, {last / (clip.Fps * speed):F1} s at speed {speed:F2}), " +
+                               $"{_pguSlowed:F1} s lost slowing for the doll (up to {_pguGapMax:F2} m behind)");
             Release();
         }
         return true;
@@ -117,10 +137,10 @@ internal partial class NmBody
     /// Update, before the physics steps: the clip's pose (last LateUpdate) as the muscles' target.
     private void PhysGetUpTarget()
     {
-        if (!_pgu || !_pguHave) return;
+        if (!_pgu || !_pguHave || _pguLost != null) return;
         var tPos = (Vector3[])_pguPos.Clone(); var tRot = (Quaternion[])_pguRot.Clone(); var tOk = new bool[Parts];
         for (int k = 0; k < Parts; k++) tOk[k] = _bones[k] != null;
-        if (_pguBind.SpineFitted && !FitSpine(tPos, tRot, tOk, _bones, _pguBind.SpineFrac)) return;
+        if (_pguBind.SpineFitted && !FitSpine(tPos, tRot, tOk, _bones, _pguBind.SpineFrac)) { _pguLost = "spine unreadable"; return; }
         SeedPoseFK(_pguBind, tPos, tRot, tOk, _pguGeom, out Vector3[] sPos, out Quaternion[] sRot);
         if (!_pguOffSet)
         {
@@ -147,8 +167,39 @@ internal partial class NmBody
             ToNm(sPos[k], _pguZero, k * 7);
             _pguZero[k * 7 + 3] = -r.x; _pguZero[k * 7 + 4] = -r.z; _pguZero[k * 7 + 5] = -r.y; _pguZero[k * 7 + 6] = r.w;
         }
+        if (nm_agent_get_part_transform(_agent, 0, _pgP, _pgR) >= 0)
+        {
+            Vector3 doll = ToUnity(_pgP[0], _pgP[1], _pgP[2]);
+            float off = (_pguTPos[0] - doll).magnitude;
+            if (_pguTargets == 0)
+                EuphoriaPlugin.LogV($"Delirium: {_p?.ProfileId} physical get-up: first target, pelvis {off:F2} m off the doll (doll {doll:F1}, clip pelvis {_pguPos[0]:F1})");
+            if (off > PguLostGap) { _pguLost = $"the clip's pelvis {off:F1} m off the doll's (doll {doll:F1}, target {_pguTPos[0]:F1}, target #{_pguTargets + 1})"; return; }
+        }
+        _pguTargets++;
         nm_agent_set_zero_pose(_agent, _pguZero, Parts);
     }
+
+    /// The physical get-up can't go on: the clip plays on alone from the pose he's shown in (the plain
+    /// get-up, as PlayClip starts it when it can't keep the doll). False = no clip to play on.
+    private bool PhysGetUpFallBack(string why)
+    {
+        if (!_pgu || _getUp == null || _dying || _p == null) return false;
+        EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} physical get-up -> the clip alone ({why}); {_pguTargets} target(s), " +
+                           $"fastest after the step {_pguPreMax:F1} m/s ({PguPartName(_pguPreK)}), after the assist {_pguPostMax:F1} m/s ({PguPartName(_pguPostK)}), " +
+                           $"{Time.time - _pguStart:F2} s in");
+        _pgu = false; _pguHave = false; // first: Release keeps the clip
+        _holdOver = true; // the gun stays in his hand and the speed limit on while he rises
+        Release(false);
+        _holdOver = false;
+        _blending = false;
+        for (int k = 0; k < Parts; k++) if (_bones[k] != null) _blendRot[k] = _bones[k].rotation;
+        _blendPelvis = _bones[0].position;
+        _guStartTime = Time.time; // the clip eases in from the pose he's shown in
+        enabled = true;
+        return true;
+    }
+
+    private string PguPartName(int k) => k >= 0 && k < Parts && _bones[k] != null ? _bones[k].name.Replace("Base Human", "") : $"part {k}";
 
     /// After each physics step: every part pulled towards the clip's, position and angle, through its
     /// velocity: the lift the muscles can't give, soft enough that the body's weight and contacts still
@@ -156,9 +207,10 @@ internal partial class NmBody
     /// Once he balances the limbs are mostly left to it, so his feet can step.
     private void PhysGetUpAssist()
     {
-        if (!_pgu || !_pguHave) return;
+        if (!_pgu || !_pguHave || _pguTargets == 0 || _pguLost != null) return; // never towards a target this get-up hasn't set
         float a = EuphoriaPlugin.Instance?.GetUpAssist.Value ?? 0.6f;
         if (a <= 0f) return;
+        float pre = 0f, post = 0f; int preK = -1, postK = -1;
         for (int k = 0; k < Parts; k++)
         {
             float share = AssistShare[k];
@@ -167,6 +219,8 @@ internal partial class NmBody
             if (_pguAlive && !core) share *= 0.3f;
             if (nm_agent_get_part_transform(_agent, k, _pgP, _pgR) < 0) continue;
             nm_agent_get_part_velocity(_agent, k, _pgV, _pgW);
+            float sp = new Vector3(_pgV[0], _pgV[1], _pgV[2]).magnitude;
+            if (sp > pre) { pre = sp; preK = k; }
             Vector3 pos = ToUnity(_pgP[0], _pgP[1], _pgP[2]);
             float gap = (_pguTPos[k] - pos).magnitude;
             if (k == 0) _pguGap = gap;
@@ -180,9 +234,17 @@ internal partial class NmBody
             if (ang > 180f) ang -= 360f;
             Vector3 e = Mathf.Abs(ang) > 0.01f && axis.sqrMagnitude > 0.5f ? axis * (ang * Mathf.Deg2Rad) : Vector3.zero;
             w += (kr * e - dr * w) * Step;
+            if (v.magnitude > post) { post = v.magnitude; postK = k; }
             ToNm(v, _pgV);
             ToNm(-w, _pgW);
             nm_agent_set_part_state(_agent, k, _pgP, _pgR, _pgV, _pgW);
+        }
+        _pguPreMax = pre; _pguPreK = preK; _pguPostMax = post; _pguPostK = postK;
+        if ((pre > 12f || post > 12f) && _pguDiag < 3)
+        {
+            _pguDiag++;
+            EuphoriaPlugin.Log($"Delirium: {_p?.ProfileId} physical get-up {Time.time - _pguStart:F2} s in: fastest after the step {pre:F1} m/s ({PguPartName(preK)}), " +
+                               $"after the assist {post:F1} m/s ({PguPartName(postK)}), pelvis {_pguGap:F2} m off its target, {_pguTargets} target(s)");
         }
     }
 
@@ -195,6 +257,9 @@ internal partial class NmBody
         float speed = Mathf.Max(0.2f, clip.Arms ? EuphoriaPlugin.Instance?.ArmGetUpSpeed.Value ?? 1f : EuphoriaPlugin.Instance?.GetUpSpeed.Value ?? 0.7f);
         float wait = 1f - 0.8f * Mathf.SmoothStep(0f, 1f, (_pguGap - 0.2f) / 0.3f); // the doll well behind: the clip slows for it
         _guFrame += Time.deltaTime * clip.Fps * speed * wait;
+        _pguSlowed += Time.deltaTime * (1f - wait);
+        _pguGapMax = Mathf.Max(_pguGapMax, _pguGap);
+        if (_pguStood == 0f && _guFrame >= clip.StandFrame) _pguStood = Time.time - _pguStart;
         float last = clip.Frames - 1;
         float fr = Mathf.Min(_guFrame, last);
         int i0 = (int)fr, i1 = Mathf.Min(i0 + 1, clip.Frames - 1);

@@ -93,36 +93,50 @@
                 </ScrollViewer>
             </TabItem>
 
+            <!-- ==================== Damage (Player) (client) ==================== -->
+            <TabItem Header="Damage (Player)">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4,4,4,4">
+                    <StackPanel>
+                        <GroupBox Header="Your own damage (client)" Style="{StaticResource SectionHeader}">
+                            <StackPanel>
+                                <CheckBox x:Name="PlayerDamageOn" Content="Enable player damage settings (ignores the Damage tab for hits on you)"/>
+                                <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,2"
+                                           Text="Your personal settings for hits on you. Bots keep using the Damage tab. Off = you take damage like everyone else. Needs the damage model active."/>
+                                <StackPanel x:Name="PlayerDamageOptions" Margin="20,0,0,0">
+                                    <StackPanel x:Name="PlayerDamageRows"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </GroupBox>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
             <!-- ==================== Wounds (client) ==================== -->
             <TabItem Header="Wounds">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4,4,4,4">
                     <StackPanel>
-                        <GroupBox Header="Wound reactions (client)" Style="{StaticResource SectionHeader}">
+                        <GroupBox Header="Wound reactions (player)" Style="{StaticResource SectionHeader}">
                             <StackPanel>
-                                <CheckBox x:Name="WeaponDropOn" Content="Weapon drop on arm wounds (player)"/>
+                                <TextBlock Text="These only happen to you, never to bots." Style="{StaticResource Hint}"/>
+                                <CheckBox x:Name="WeaponDropOn" Content="Weapon drop on arm wounds"/>
+                                <StackPanel x:Name="WeaponDropRows" Margin="20,0,0,0"/>
                                 <CheckBox x:Name="WoundFallOn" Content="Fall on leg wounds"/>
-                                <TextBlock Text="Base odds in percent. Bigger wounds raise them." Style="{StaticResource Hint}" Margin="0,4,0,2"/>
-                                <StackPanel x:Name="ReactionRows"/>
-                            </StackPanel>
-                        </GroupBox>
-
-                        <GroupBox Header="Stance lock (client)" Style="{StaticResource SectionHeader}">
-                            <StackPanel>
-                                <CheckBox x:Name="ProneLockOn" Content="Prone lock"/>
-                                <CheckBox x:Name="CrouchLockOn" Content="Crouch lock"/>
-                                <TextBlock Text="Leg HP percent below which you can't stand up from prone or crouch." Style="{StaticResource Hint}" Margin="0,4,0,2"/>
-                                <StackPanel x:Name="StanceRows"/>
+                                <StackPanel x:Name="WoundFallRows" Margin="20,0,0,0"/>
+                                <TextBlock Text="Odds are base odds in percent. Bigger wounds raise them." Style="{StaticResource Hint}" Margin="0,4,0,2"/>
                             </StackPanel>
                         </GroupBox>
 
                         <GroupBox Header="Leg cripple (client)" Style="{StaticResource SectionHeader}">
                             <StackPanel>
                                 <CheckBox x:Name="LegCrippleOn" Content="Leg cripple"/>
-                                <UniformGrid Columns="2">
-                                    <CheckBox x:Name="LegCripplePlayer" Content="Affects the player"/>
-                                    <CheckBox x:Name="LegCrippleBots" Content="Affects bots"/>
-                                </UniformGrid>
-                                <StackPanel x:Name="CrippleRows"/>
+                                <StackPanel x:Name="CrippleOptions" Margin="20,0,0,0">
+                                    <CheckBox x:Name="LegCrippleStayDown" Content="Stay down until healed"/>
+                                    <UniformGrid Columns="2">
+                                        <CheckBox x:Name="LegCripplePlayer" Content="Affects the player"/>
+                                        <CheckBox x:Name="LegCrippleBots" Content="Affects bots"/>
+                                    </UniformGrid>
+                                    <StackPanel x:Name="CrippleRows"/>
+                                </StackPanel>
                             </StackPanel>
                         </GroupBox>
                     </StackPanel>

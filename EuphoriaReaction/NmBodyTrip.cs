@@ -95,7 +95,7 @@ internal partial class NmBody
     private void BeginTrip(Vector3 dir, float speed, int foot, string what)
     {
         _tripped = true; _tripAt = Time.time;
-        _saveRolled = true;     // no catching himself out of this
+        _overSeen = true;       // no false-alarm hand-back out of this
         _catchFallSent = true;  // the catch-fall (or the roll) comes from here
         float m = Mathf.Max(20f, nm_agent_get_mass(_agent));
         Vector3 j = dir * (m * Mathf.Clamp(speed * 0.5f, 0.3f, 0.6f));

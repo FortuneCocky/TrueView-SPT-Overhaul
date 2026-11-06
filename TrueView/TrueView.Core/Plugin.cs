@@ -7,20 +7,21 @@ using UnityEngine;
 
 namespace TrueView.Core;
 
-[BepInPlugin("com.trueview", "TrueView", "2.2.1")]
+[BepInPlugin("com.trueview", "TrueView", "2.3.0")]
 public class Plugin : BaseUnityPlugin
 {
 	public const string GUID = "com.trueview";
 
 	public const string Name = "TrueView";
 
-	public const string Version = "2.2.1";
+	public const string Version = "2.3.0";
 
 	private void Awake()
 	{
 		Log.Init(base.Logger);
 		HandlingConfig.Init(base.Config);
 		PatchRegistry.EnableAll();
+		CameraLensSystem.Create(base.gameObject);
 		Log.Info("TrueView 2.0.0 loaded");
 	}
 }

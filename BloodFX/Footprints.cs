@@ -40,8 +40,8 @@ internal sealed class Footprints
     private Vector3[] _v;
     private Color32[] _c;
     private int _next, _live;
-    private bool _dirty;
-    private float _nextTick;
+    private bool _dirty, _audited;
+    private float _nextTick, _nextAudit;
     private Vector3 _min, _max;
 
     static Footprints()
@@ -110,6 +110,7 @@ internal sealed class Footprints
         _p = new Print[capacity];
         _v = new Vector3[capacity * Per];
         _c = new Color32[capacity * Per];
+        Wet.Fill(_c);
         var tris = new int[capacity * Pads * Seg * 9];
         int t = 0;
         for (int i = 0; i < capacity; i++)
@@ -217,6 +218,11 @@ internal sealed class Footprints
         _dirty = false;
         _mesh.vertices = _v;
         _mesh.colors32 = _c;
+        if (now >= _nextAudit && BloodFXPlugin.Instance != null && BloodFXPlugin.Instance.DebugLog.Value)
+        {
+            _nextAudit = now + 2f;
+            Wet.Audit(_c, _c.Length, "footprints", ref _audited);
+        }
         if (_live > 0)
         {
             var b = new Bounds();

@@ -197,6 +197,23 @@ internal sealed class BloodPools
         return slot >= 0 && slot < _p.Length && _p[slot].Live && _p[slot].Serial == serial;
     }
 
+    /// <summary>The nearest live, feedable pool whose centre is within <paramref name="reach"/> of a point, so blood from many streams shares one puddle.</summary>
+    public bool FindNear(Vector3 pos, float reach, out int slot, out int serial)
+    {
+        slot = -1;
+        serial = 0;
+        float best = reach * reach;
+        for (int i = 0; i < _p.Length; i++)
+        {
+            ref Pool p = ref _p[i];
+            // feedable pools, and any big one (a body's death pool) that blood can simply join
+            if (!p.Live || (p.MaxR <= p.Radius && p.MaxR < 0.2f)) continue;
+            float d = (p.Pos - pos).sqrMagnitude;
+            if (d < best) { best = d; slot = i; serial = p.Serial; }
+        }
+        return slot >= 0;
+    }
+
     /// <summary>More blood arriving on a pool: its target grows by that much area and it lives on from now.</summary>
     public void Feed(int slot, int serial, float area, float now)
     {

@@ -40,13 +40,13 @@ public class ApplyDamageInfoPatch : ModulePatch
 
         ShotgunModel.Apply(__instance, ref damageInfo);
 
-        float globalMul = HardcoreDMGPlugin.DamageScale.Value;
+        Scales s = ScalesFor(__instance);
 
         // --- Head damage bonus ---
         if (bodyPartType == EBodyPart.Head)
         {
-            damageInfo.Damage *= globalMul * HardcoreDMGPlugin.HeadshotScale.Value;
-            ApplyBleedModifiers(ref damageInfo, 0.5f); // scalp wounds bleed, but rarely heavily
+            damageInfo.Damage *= s.Overall * s.Head;
+            ApplyBleedModifiers(ref damageInfo, s, 0.5f); // scalp wounds bleed, but rarely heavily
             return;
         }
 
@@ -54,7 +54,7 @@ public class ApplyDamageInfoPatch : ModulePatch
         if (HardcoreDMGPlugin.TorsoZonesOn.Value &&
             (bodyPartType == EBodyPart.Chest || bodyPartType == EBodyPart.Stomach))
         {
-            ApplyTorsoZone(__instance, ref damageInfo, bodyPartType, globalMul);
+            ApplyTorsoZone(__instance, ref damageInfo, bodyPartType, s);
             return;
         }
 
@@ -62,27 +62,67 @@ public class ApplyDamageInfoPatch : ModulePatch
         switch (bodyPartType)
         {
             case EBodyPart.Chest:
-                damageInfo.Damage *= globalMul * HardcoreDMGPlugin.ChestScale.Value;
+                damageInfo.Damage *= s.Overall * s.Chest;
                 break;
             case EBodyPart.Stomach:
-                damageInfo.Damage *= globalMul * HardcoreDMGPlugin.StomachScale.Value;
+                damageInfo.Damage *= s.Overall * s.Stomach;
                 break;
             case EBodyPart.LeftArm:
             case EBodyPart.RightArm:
-                damageInfo.Damage *= globalMul * HardcoreDMGPlugin.ArmScale.Value;
-                ApplyBleedModifiers(ref damageInfo, 0.35f);
+                damageInfo.Damage *= s.Overall * s.Arm;
+                ApplyBleedModifiers(ref damageInfo, s, 0.35f);
                 TryWeaponDrop(__instance, damageInfo, bodyPartType);
                 break;
             case EBodyPart.LeftLeg:
             case EBodyPart.RightLeg:
-                damageInfo.Damage *= globalMul * HardcoreDMGPlugin.LegScale.Value;
-                ApplyBleedModifiers(ref damageInfo, 0.7f); // femoral arteries make thigh hits bleed
+                damageInfo.Damage *= s.Overall * s.Leg;
+                ApplyBleedModifiers(ref damageInfo, s, 0.7f); // femoral arteries make thigh hits bleed
                 TryWoundFall(__instance, damageInfo, bodyPartType);
                 break;
             default:
-                damageInfo.Damage *= globalMul;
+                damageInfo.Damage *= s.Overall;
                 break;
         }
+    }
+
+    // ==================== Damage scales ====================
+
+    /// <summary>
+    /// The damage and bleed scales for one hit. Hits on the local player use
+    /// the Damage (Player) settings when "Use my own damage settings" is on;
+    /// everything else uses the main damage model settings.
+    /// </summary>
+    private readonly struct Scales
+    {
+        public readonly float Overall, Head, Chest, Stomach, Arm, Leg, HeavyBleed, LightBleed;
+
+        public Scales(float overall, float head, float chest, float stomach, float arm, float leg, float heavyBleed, float lightBleed)
+        {
+            Overall = overall;
+            Head = head;
+            Chest = chest;
+            Stomach = stomach;
+            Arm = arm;
+            Leg = leg;
+            HeavyBleed = heavyBleed;
+            LightBleed = lightBleed;
+        }
+    }
+
+    private static Scales ScalesFor(Player target)
+    {
+        if (target.IsYourPlayer && HardcoreDMGPlugin.PlayerDamageOn.Value)
+            return new Scales(
+                HardcoreDMGPlugin.PlayerDamageScale.Value, HardcoreDMGPlugin.PlayerHeadshotScale.Value,
+                HardcoreDMGPlugin.PlayerChestScale.Value, HardcoreDMGPlugin.PlayerStomachScale.Value,
+                HardcoreDMGPlugin.PlayerArmScale.Value, HardcoreDMGPlugin.PlayerLegScale.Value,
+                HardcoreDMGPlugin.PlayerHeavyBleedScale.Value, HardcoreDMGPlugin.PlayerLightBleedScale.Value);
+
+        return new Scales(
+            HardcoreDMGPlugin.DamageScale.Value, HardcoreDMGPlugin.HeadshotScale.Value,
+            HardcoreDMGPlugin.ChestScale.Value, HardcoreDMGPlugin.StomachScale.Value,
+            HardcoreDMGPlugin.ArmScale.Value, HardcoreDMGPlugin.LegScale.Value,
+            HardcoreDMGPlugin.HeavyBleedScale.Value, HardcoreDMGPlugin.LightBleedScale.Value);
     }
 
     // ==================== Torso zones ====================
@@ -141,15 +181,13 @@ public class ApplyDamageInfoPatch : ModulePatch
     /// Applies the torso zone for a chest/stomach hit, picked from the collider
     /// that was struck. Unknown colliders count as the core.
     /// </summary>
-    private static void ApplyTorsoZone(Player player, ref DamageInfo di, EBodyPart bodyPart, float globalMul)
+    private static void ApplyTorsoZone(Player player, ref DamageInfo di, EBodyPart bodyPart, Scales s)
     {
         if (!ColliderZones.TryGetValue(di.BodyPartColliderType, out TorsoZone zone))
             zone = TorsoZone.Core;
 
         ZoneEffect fx = EffectFor(zone);
-        float partMul = bodyPart == EBodyPart.Chest
-            ? HardcoreDMGPlugin.ChestScale.Value
-            : HardcoreDMGPlugin.StomachScale.Value;
+        float partMul = bodyPart == EBodyPart.Chest ? s.Chest : s.Stomach;
 
         float damage = di.Damage * fx.Damage * partMul;
 
@@ -160,18 +198,18 @@ public class ApplyDamageInfoPatch : ModulePatch
                 damage = Mathf.Max(damage, remaining * fx.LethalShare);
         }
 
-        di.Damage = damage * globalMul;
-        di.HeavyBleedingDelta *= fx.HeavyBleed * HardcoreDMGPlugin.HeavyBleedScale.Value;
-        di.LightBleedingDelta *= fx.LightBleed * HardcoreDMGPlugin.LightBleedScale.Value;
+        di.Damage = damage * s.Overall;
+        di.HeavyBleedingDelta *= fx.HeavyBleed * s.HeavyBleed;
+        di.LightBleedingDelta *= fx.LightBleed * s.LightBleed;
     }
 
     /// <summary>
     /// Scales bleed deltas by the configured multiplier and a body-part factor.
     /// </summary>
-    private static void ApplyBleedModifiers(ref DamageInfo di, float bodyPartBleedFactor)
+    private static void ApplyBleedModifiers(ref DamageInfo di, Scales s, float bodyPartBleedFactor)
     {
-        di.HeavyBleedingDelta *= HardcoreDMGPlugin.HeavyBleedScale.Value * bodyPartBleedFactor;
-        di.LightBleedingDelta *= HardcoreDMGPlugin.LightBleedScale.Value * bodyPartBleedFactor;
+        di.HeavyBleedingDelta *= s.HeavyBleed * bodyPartBleedFactor;
+        di.LightBleedingDelta *= s.LightBleed * bodyPartBleedFactor;
     }
 
     // ==================== Wound severity ====================
@@ -247,14 +285,14 @@ public class ApplyDamageInfoPatch : ModulePatch
     }
 
     /// <summary>
-    /// Chance to fall prone when a leg hit leaves the leg badly hurt. Only rolls
-    /// once the leg drops below 35% HP; the lower it goes and the bigger the
-    /// wound, the likelier the fall. Thigh hits (femur) count extra.
+    /// Chance for the player to fall prone when a leg hit leaves the leg badly
+    /// hurt. Only rolls once the leg drops below 35% HP; the lower it goes and
+    /// the bigger the wound, the likelier the fall. Thigh hits (femur) count extra.
     /// </summary>
     private static void TryWoundFall(Player player, DamageInfo di, EBodyPart bodyPart)
     {
         if (!HardcoreDMGPlugin.WoundFallOn.Value) return;
-        if (player.IsYourPlayer && !HardcoreDMGPlugin.LegCrippleEnablePlayer.Value) return;
+        if (!player.IsYourPlayer) return;
 
         try
         {

@@ -19,6 +19,8 @@ internal static class TacticalStancesCompat
     private static bool _initDone;
     private static FieldInfo _posOffset, _rotOffset, _leanPos, _leanRot, _suppress;
     private static FieldInfo _bend, _basePos, _baseRot;
+    private static PropertyInfo _effectiveStance;
+    private static FieldInfo _enableStances;
 
     public static bool Installed { get; private set; }
 
@@ -39,6 +41,31 @@ internal static class TacticalStancesCompat
                 Vector3 pos = ((Vector3)_posOffset.GetValue(null) + (Vector3)_leanPos.GetValue(null)) * vis;
                 Vector3 rot = ((Vector3)_rotOffset.GetValue(null) + (Vector3)_leanRot.GetValue(null)) * vis;
                 return pos.sqrMagnitude > 4e-6f || rot.sqrMagnitude > 0.04f;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Firing from Active Aim or Canted Aim, the fire-return pose included
+    /// (a shot from Low or High Ready that brings the gun up to Active Aim).
+    /// </summary>
+    public static bool StanceFire
+    {
+        get
+        {
+            EnsureInit();
+            if (_effectiveStance == null)
+                return false;
+            try
+            {
+                if (_enableStances?.GetValue(null) is BepInEx.Configuration.ConfigEntry<bool> on && !on.Value)
+                    return false;
+                string stance = _effectiveStance.GetValue(null)?.ToString();
+                return stance == "ActiveAim" || stance == "CantedAim";
             }
             catch
             {
@@ -95,6 +122,9 @@ internal static class TacticalStancesCompat
             _bend = manager?.GetField("_bendAngle", flags);
             _basePos = manager?.GetField("_baseLocalPos", flags);
             _baseRot = manager?.GetField("_baseLocalRot", flags);
+            Type plugin = info.Instance.GetType();
+            _effectiveStance = plugin.GetProperty("EffectiveStance", BindingFlags.Public | BindingFlags.Static);
+            _enableStances = plugin.GetField("EnableStances", BindingFlags.Public | BindingFlags.Static);
             if (_posOffset == null || _rotOffset == null || _leanPos == null || _leanRot == null || _suppress == null)
             {
                 Log.Warning("Tactical Stances found, but its stance offsets have changed: compatibility off");

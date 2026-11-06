@@ -1,24 +1,29 @@
-; Euphoria Reaction balance preset: Tough
-; Our own tuning, set against the Delirium engine's defaults (noted after each value).
-; Bots fight harder to stay up: stiffer, more catch steps, less lean and spin from a hit.
+; Euphoria Reaction toughness: Tough
+; Natural (balance_natural.txt) with the odds moved: a firmer upright pull, more catch steps, and a shot
+; leg holds 1.5 s before it folds. Same stagger: measured offline he still takes about 5 steps and
+; staggers 1.2 m in the first second, but only 12% of the 36 test hits put him down (Natural 33%).
 
 NMShot_Standing * {
-  shotMaxSteps            8      ; engine 6: more catch steps before he gives up
-  shotBodyStiffness       15.5   ; engine 13.5
-  shotLooseness           0.7    ; engine 1.0: less floppy
-  shotUprightStiffness    5.0    ; engine 3.0: pulls himself upright harder
-  shotLeanAmount          0.2    ; engine 0.3: leans less into the hit
-  shockSpinMin            25     ; engine 40: less twist from the hit
-  shockSpinMax            50     ; engine 80
+  shotMaxSteps                    10      ; Natural 8
+  shotBodyStiffness               15.346
+  shotLooseness                   0.847
+  shotUprightStiffness            3.8     ; Natural 3.167
+  shotLeanAmount                  0.309
+  shockSpinMin                    10.212
+  shockSpinMax                    75.907
+  shotTimeBeforeCollapseWoundLeg  1.5     ; Natural 0.44
 }
 
 NMShot_IsMoving * {
-  balanceBodyStiffness    14.0   ; engine 12
-  balanceMaxSteps         5      ; engine 3
-  balanceLeanAmount       0.3    ; engine 0.4
+  balanceBodyStiffness            12.822
+  balanceMaxSteps                 5       ; Natural 4
+  balanceLeanAmount               0.050
+  balanceBodyDamping              1.370
 }
 
-NMBalance * {
-  balanceStiffness        11.0   ; engine 9
-  balanceDamping          0.8    ; engine 0.7
+; Shot on the run (read by the mod): offline 25% down at 3.5 m/s, about 40% at 5 m/s and over, 5-6 steps.
+EuphoriaRun * {
+  runStaggerSpeed                 3.5
+  runUprightSlow                  5.2     ; Natural 4.5
+  runUprightFast                  4.3     ; Natural 3.6
 }

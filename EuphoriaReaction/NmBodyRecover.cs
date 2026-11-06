@@ -4,10 +4,10 @@ using static Delirium.Native;
 namespace EuphoriaReaction;
 
 /// <summary>
-/// Saves, stuck bodies and how he lies once down.
-///  - Save: the moment a stumble goes over (balance lost) he catches himself and is matched into the
-///    nearest stance (stand or crouch; a prone bot shoved about stays prone), unless FallReason
-///    (NmBodyAdapt) gives a reason: a hard one always falls, a soft one at the config's odds.
+/// Going over, stuck bodies and how he lies once down.
+///  - Going over: the physics decides; when his balance is lost he goes down. Two safety nets only: a
+///    prone bot shoved about settles back into prone, and an engine "fallen" on a man still standing
+///    tall and barely leaning is a false alarm, so he is handed straight back to his stance.
 ///  - Stuck: no reaction may run on forever; long after the last hit he is put in the stance
 ///    closest to how he lies.
 ///  - Fallen: never limp while alive: he props himself up and holds the wound, or, badly hurt,
@@ -15,22 +15,20 @@ namespace EuphoriaReaction;
 /// </summary>
 internal partial class NmBody
 {
-    private const float SaveTilt = 40f;    // deg the trunk may lean off vertical and still be caught
     private const float ProneSaveAfter = 0.6f; // s after a hit before a shoved prone bot settles back
 
-    private bool _saveRolled;
+    private bool _overSeen; // this stumble's going over has been handled
     private float _matchCooldown;
     private bool _floorNetLogged;
     private int _fallenStyle = -1;
 
     private int _matchFell; // stance matches that fell over this reaction
 
-    private static float SaveChance => EuphoriaPlugin.Instance?.StumbleSave.Value ?? 0.7f;
     private static float StuckMax => EuphoriaPlugin.Instance?.StuckMax.Value ?? 12f;
 
     private void RecoverAttach()
     {
-        _saveRolled = false;
+        _overSeen = false;
         _fallenStyle = -1;
         _matchCooldown = 0f;
         _matchFell = 0;
@@ -49,57 +47,39 @@ internal partial class NmBody
         return up.sqrMagnitude < 1e-6f ? 90f : Vector3.Angle(up, Vector3.up);
     }
 
-    /// Update, once per stumble: true when he caught himself (the stance match took over).
-    private bool StumbleSaveTick(float h)
+    /// Update, once per stumble, the moment it goes over: true when a safety net took him (otherwise he goes
+    /// down, the physics' call).
+    private bool OverTick(float h)
     {
-        // already put down (the stumble's max, or the catch already sent): his balance is gone, and a stance match
-        // pulling a falling body upright launched him into whatever was near (7-12 m/s, flips)
-        if (_saveRolled || _downSince > 0f || _catchFallSent) return false;
+        // already put down (the catch already sent): his balance is gone, and a stance match pulling a falling
+        // body upright launched him into whatever was near (7-12 m/s, flips)
+        if (_overSeen || _downSince > 0f || _catchFallSent) return false;
         if (_startPose == StartPose.Prone)
         {
             // shoved while prone: he settles back into prone instead of flailing on
             if (Time.time - _lastHitAt < ProneSaveAfter) return false;
-            _saveRolled = true;
-            if (Random.value >= SaveChance || !LyingFaceDown(out Vector3 hd)) return false;
+            _overSeen = true;
+            if (!LyingFaceDown(out Vector3 hd)) return false;
             EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} stays down in prone");
             return BeginMatch(StartPose.Prone, hd);
         }
-        // the moment the stumble goes over
         float tilt = TrunkTilt();
         bool over = nm_agent_has_fallen(_agent) == 1
                     || (nm_agent_is_balancing(_agent) == 0 && Time.time - _attachAt > 0.3f && tilt > 15f);
         if (!over) return false;
-        _saveRolled = true;
-        // balance is the rule: he falls only for a reason (NmBodyAdapt), and a soft one only at the odds
-        string why = FallReason(tilt, h, out bool hard);
-        if (why != null && (hard || Random.value >= SaveChance))
+        _overSeen = true;
+        // a false alarm: the engine gave up on a man still standing tall and barely leaning. Its balancer is gone for
+        // good, so a stance match had nothing holding him up (he collapsed in it, lay 5 s and got up): straight back
+        // to his stance instead
+        if (tilt < 20f && h > ComScaled(0.95f, 0.85f) && RecoverStance() == StartPose.Stand)
         {
-            EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} goes down: {why} (lean {tilt:F0} deg, COM {h:F2}m)");
-            return false;
-        }
-        StartPose to = RecoverStance(h < ComScaled(0.65f, 0.7f)); // by his health and how low he is (NmBodyPhase)
-        if (to == StartPose.Prone)
-        {
-            EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} too hurt to catch himself ({StumbleEngine.HpFraction(_p):P0} HP)");
-            return false;
-        }
-        // still upright: straight back to his feet. Once the engine calls a fall its balancer is gone for good, so a
-        // stance match on a man barely leaning had nothing holding him up: he "caught himself" at 4 deg, then
-        // collapsed in the match, lay 5 s and got up
-        if (to == StartPose.Stand && tilt < 20f && h > ComScaled(0.95f, 0.85f))
-        {
-            EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} regains his footing{(why != null ? $" despite: {why}" : "")} (lean {tilt:F0} deg, COM {h:F2}m)");
+            EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} regains his footing (lean {tilt:F0} deg, COM {h:F2}m)");
             _blendDur = 0.5f;
             ReleaseToStance();
             return true;
         }
-        // the catch: a hard pull upright and firm legs while the stance match blends him in
-        Send("stayUpright", ("start", true), ("stiffness", Tune.Upright * 2.5f));
-        Send("configureBalance", ("legStiffness", Tune.LegStiff * 1.3f));
-        EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} catches himself{(why != null ? $" despite: {why}" : "")} (lean {tilt:F0} deg, COM {h:F2}m) - {to.ToString().ToLowerInvariant()}");
-        if (BeginMatch(to, DollFacing())) return true;
-        ReleaseToStance();
-        return true;
+        EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} goes over (lean {tilt:F0} deg, COM {h:F2}m)");
+        return false;
     }
 
     /// Update: true when he'd been in the reaction too long and was sent to his closest stance.

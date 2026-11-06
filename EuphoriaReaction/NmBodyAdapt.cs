@@ -3,27 +3,20 @@ using UnityEngine;
 namespace EuphoriaReaction;
 
 /// <summary>
-/// The reaction reads where he is. Balance is the rule and a fall the exception:
-///  - At each hit (not prone, not down), the way the shot pushes him is checked: a wall or crate within
-///    reach behind him -> the balancerCollisionsReaction behaviour (he meets it, braces on it, and slumps down it
-///    only if he can't stop); a drop of more than a step -> teeter (he leans away from the edge, and goes
-///    over only if he's pushed past it). Steps going down are the stair roll's (NmBodyTrip).
-///  - When a stumble goes over, he catches himself unless something says he can't (FallReason):
-///    hard reasons (leaning past saving, tripped, rolling down stairs, a knee, hip or hand already on the
-///    floor) always fall; soft ones (bumped into something, shot in the leg, badly hurt, leaning far, low)
-///    fall at the config's "doesn't catch himself" odds; with none he always catches himself. A hand or
-///    shoulder on a wall is support, not a fall.
+/// The reaction reads where he is. At each hit (not prone, not down), the way the shot pushes him is
+/// checked: a wall or crate within reach behind him -> the balancerCollisionsReaction behaviour (he meets it,
+/// braces on it, and slumps down it only if he can't stop); a drop of more than a step -> teeter (he leans
+/// away from the edge, and goes over only if he's pushed past it). Steps going down are the stair roll's
+/// (NmBodyTrip).
 /// </summary>
 internal partial class NmBody
 {
-    private const float HardTilt = 65f;     // deg: past this nobody saves it
     private const float WallReach = 1.1f;   // m from his chest: a wall this close is one he meets
     private const float LedgeDrop = 0.7f;   // m: a drop deeper than a step
 
     private bool _wallSent, _edgeSent;
-    private bool _bumped; // met a wall or an object this reaction
 
-    private void AdaptAttach() { _wallSent = _edgeSent = _bumped = false; }
+    private void AdaptAttach() { _wallSent = _edgeSent = false; }
 
     /// At a hit: what lies the way he's pushed.
     private void AdaptToSurroundings(Vector3 dir)
@@ -60,31 +53,5 @@ internal partial class NmBody
                 break;
             }
         }
-    }
-
-    /// Why this stumble can't be caught, or null. `hard`: it always falls; otherwise it falls at the odds.
-    private string FallReason(float tilt, float h, out bool hard)
-    {
-        hard = true;
-        if (tilt > HardTilt) return $"leaning {tilt:F0} deg, past saving";
-        if (_tripped) return "tripped";
-        if (_stairRoll) return "going down the stairs";
-        bool wall = false;
-        for (int k = 0; k < Parts; k++)
-        {
-            if (k == 3 || k == 6 || Delirium.Native.nm_agent_get_part_contact(_agent, k) == 0) continue;
-            Part(k, out Vector3 at, out _);
-            // on the floor under him (a knee, hip or hand down) is a fall already; against something upright is support
-            if (RayWorld(at + Vector3.up * 0.05f, Vector3.down, 0.3f, out RaycastHit g) && g.normal.y > 0.6f) return $"part {k} already on the floor";
-            wall = true;
-        }
-        if (wall) _bumped = true;
-        hard = false;
-        if (_bumped && _wallSent) return "bumped into something";
-        if (_lastHit.part >= 1 && _lastHit.part <= 6) return "shot in the leg";
-        if (StumbleEngine.HpFraction(_p) < 0.35f) return "badly hurt";
-        if (tilt > SaveTilt) return $"leaning {tilt:F0} deg";
-        if (h <= ComScaled(0.55f, 0.65f)) return $"low (COM {h:F2} m)";
-        return null;
     }
 }

@@ -25,7 +25,7 @@ internal partial class NmBody : MonoBehaviour
 {
     private const int Parts = 21;
     private const float Step = 1f / 60f;
-    private const float MaxCarrySpeed = 5f;   // m/s of running momentum carried into the doll
+    private const float MaxCarrySpeed = 8.5f; // m/s of running momentum carried into the doll (a sprint; more is a teleport/hitch)
     private const float BlendOut = 0.3f, GetUpBlend = 1.1f;
     private float _blendDur = BlendOut, _downSince;
 
@@ -72,20 +72,55 @@ internal partial class NmBody : MonoBehaviour
         NudgeDolls.Fill(); // spare nudge dolls, settled on a background thread before the first hit
     }
 
+    // From the toughness file: the upright pull the shot asks for (every other upright pull is scaled from
+    // it), and the run stagger's (EuphoriaRun, read only by us).
+    private static float _presetUpright = 3f, _runSpeed = 3.5f, _runUpSlow = 4.5f, _runUpFast = 3.6f;
+
     // Behaviour tuning for the next shot or balance task (it is read when a task starts, so a change applies
-    // from the next hit): one of our presets, or the player's own balance.txt. Engine = no overrides.
-    internal static void ApplyBalance(string dir, BalancePreset preset)
+    // from the next hit): one of our toughness files, or the player's own balance.txt.
+    internal static void ApplyBalance(string dir, Toughness tough)
     {
-        string file = preset == BalancePreset.Custom ? Path.Combine(dir, "balance.txt")
-            : Path.Combine(dir, "presets", "balance_" + preset.ToString().ToLowerInvariant() + ".txt");
+        string file = tough == Toughness.Custom ? Path.Combine(dir, "balance.txt")
+            : Path.Combine(dir, "presets", "balance_" + tough.ToString().ToLowerInvariant() + ".txt");
         if (!File.Exists(file))
         {
-            EuphoriaPlugin.Log($"Delirium: balance preset {preset} - {file} not found, engine tuning kept");
+            EuphoriaPlugin.Log($"Delirium: toughness {tough} - {file} not found, engine tuning kept");
             return;
         }
-        if (nm_load_task_params(file) < 0) EuphoriaPlugin.Log($"Delirium: balance preset {preset} - {LastError()}");
-        else { EuphoriaPlugin.Log($"Delirium: balance preset {preset} ({Path.GetFileName(file)})"); NudgeDolls.Flush(); }
+        if (nm_load_task_params(file) < 0) { EuphoriaPlugin.Log($"Delirium: toughness {tough} - {LastError()}"); return; }
+        var v = ReadTaskValues(file);
+        float Get(string key, float or) => v.TryGetValue(key, out float f) ? f : or;
+        _presetUpright = Get("NMShot_Standing.shotUprightStiffness", 3f);
+        _runSpeed = Get("EuphoriaRun.runStaggerSpeed", 3.5f);
+        _runUpSlow = Get("EuphoriaRun.runUprightSlow", 4.5f);
+        _runUpFast = Get("EuphoriaRun.runUprightFast", 3.6f);
+        EuphoriaPlugin.Log($"Delirium: toughness {tough} ({Path.GetFileName(file)}): upright {_presetUpright:F2}, " +
+                           $"run stagger from {_runSpeed:F1} m/s, upright {_runUpSlow:F2}-{_runUpFast:F2}");
+        NudgeDolls.Flush();
     }
+
+    // "Section.name" -> first value, the way the engine reads the same file (';' starts a comment).
+    private static Dictionary<string, float> ReadTaskValues(string file)
+    {
+        var d = new Dictionary<string, float>();
+        string section = null;
+        foreach (string raw in File.ReadAllLines(file))
+        {
+            int c = raw.IndexOf(';');
+            string[] w = (c >= 0 ? raw.Substring(0, c) : raw).Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+            if (w.Length == 3 && w[2] == "{") section = w[0];
+            else if (w.Length == 1 && w[0] == "}") section = null;
+            else if (section != null && w.Length >= 2
+                     && float.TryParse(w[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float f))
+                d[section + "." + w[0]] = f;
+        }
+        return d;
+    }
+
+    // The run stagger's upright pull for how fast he was going: the slow value at the run speed, the fast one
+    // from 5 m/s (faster = looser = likelier to go down).
+    private static float RunUpright(float speed)
+        => Mathf.Lerp(_runUpSlow, _runUpFast, Mathf.InverseLerp(_runSpeed, Mathf.Max(_runSpeed + 0.1f, 5f), speed));
 
     // ---------------------------------------------------------------- bones
 
@@ -838,19 +873,23 @@ internal partial class NmBody : MonoBehaviour
         return true;
     }
 
-    // Alive = stumble/balance only. Tuned headless against 10-round dumps:
-    // softer upright assist, early-step balance, no wounded-leg collapse.
+    // On his feet: the upright pull the toughness file gives the shot, the run stagger's while he staggers on,
+    // and in a crouch stumble a softer pull and legs, so he sinks while still catching himself. Otherwise the
+    // balancer's legs stay the engine's: the firmer legs (16) and pull (4-6) we used to add on top held him
+    // so still he barely stepped (1.9 steps from a light hit instead of 4.5) and his feet slid instead.
     private void TuneAlive()
     {
-        // crouch stumble: softer upright pull and legs, so he sinks while still catching himself
-        float upright = _crouchStumble ? Tune.Upright * 0.45f : Tune.Upright;
-        float legs = _crouchStumble ? Tune.LegStiff * 0.55f : Tune.LegStiff;
-        Send("stayUpright", ("start", true), ("stiffness", upright));
-        Send("configureBalance", ("legStiffness", legs), ("balanceAbortThreshold", Tune.BalanceAbort));
+        if (_crouchStumble)
+        {
+            Send("stayUpright", ("start", true), ("stiffness", _presetUpright * CrouchUpright));
+            Send("configureBalance", ("legStiffness", CrouchLegs));
+        }
+        else Send("stayUpright", ("start", true), ("stiffness", _staggering ? _runUp : _presetUpright));
     }
 
     private bool _crouchStumble, _staggering;
-    private const float RunStagger = 1.6f; // m/s his body is moving at for a hit to make him stagger on
+    private float _runUp; // the run stagger's upright pull, for how fast he was going (RunUpright)
+    private const float CrouchUpright = 0.57f, CrouchLegs = 8.8f;
 
     /// Back to animation in the stance the reaction ended in: crouched after a crouch stumble.
     private void ReleaseToStance()
@@ -859,7 +898,7 @@ internal partial class NmBody : MonoBehaviour
         Release();
     }
 
-    /// Non-lethal shot: shove + shot task, then re-assert "don't fall".
+    /// Non-lethal shot: shove + shot task; whether he stays up is the physics' call.
     public void Hit(Vector3 at, Vector3 dir, float newtonSeconds, bool legBuckle = false, Func<Vector3> aimAt = null, float aimChance = 0f)
     {
         if (!Active || _dying || _rigCheck) return;
@@ -875,14 +914,14 @@ internal partial class NmBody : MonoBehaviour
         _lastHitAt = Time.time;
         if (_reaction == Phase.Stumble) _reactionStart = Time.time; // a new hit restarts the stumble clock
         _stableFor = 0f;
-        if (_downSince == 0f) _saveRolled = false; // a new stumble: a new chance to catch himself
+        if (_downSince == 0f) _overSeen = false; // a new stumble: its going over is handled afresh
         nm_agent_get_com(_agent, _f3, _g3);
         float moving = new Vector2(_g3[0], _g3[1]).magnitude;
         // Crouch stumble: a leg hit sometimes buckles the knee and he takes it by sinking into a crouch
         // and recovering there. Only leg hits: on a shove or a torso hit a man who stumbles upright stays
         // upright (softened legs after a clean stumble read as his knees suddenly giving out, then a drop).
         // Never on the run: the crouch stopped him dead, legs held where the hit found them.
-        if (_startPose == StartPose.Stand && !_crouchStumble && _downSince == 0f && legBuckle && moving < RunStagger)
+        if (_startPose == StartPose.Stand && !_crouchStumble && _downSince == 0f && legBuckle && moving < _runSpeed)
         {
             float chance = (EuphoriaPlugin.Instance?.CrouchStumble.Value ?? 0.3f) * 2f;
             if (UnityEngine.Random.value < chance)
@@ -892,21 +931,21 @@ internal partial class NmBody : MonoBehaviour
                 EuphoriaPlugin.Log("Delirium: crouch stumble - he sinks into a crouch and recovers there");
             }
         }
+        // how soon a shot leg folds is the toughness file's, except:
         if (!(EuphoriaPlugin.Instance?.AliveFalls.Value ?? true))
-            Send("shot", ("timeBeforeCollapseWoundLeg", 99f), ("reachForWound", WoundGrab)); // stumble-only mode: no wounded-leg collapse
+            Send("shot", ("timeBeforeCollapseWoundLeg", 99f)); // stumble-only mode: no wounded-leg collapse
         else if (legBuckle)
-            Send("shot", ("timeBeforeCollapseWoundLeg", 0.3f), ("reachForWound", WoundGrab)); // the knee gives out almost at once
-        else
-            Send("shot", ("timeBeforeCollapseWoundLeg", Tune.WoundCollapse), ("reachForWound", WoundGrab)); // a torso hit doesn't fold the legs at once
+            Send("shot", ("timeBeforeCollapseWoundLeg", 0.3f)); // a heavy leg hit: the knee gives out almost at once
         // Shot on the run: the staggerFall behaviour. He keeps going the way he was, stumbling step after step
-        // with his weight thrown forward, the steps tiring until he catches himself or goes down. The
-        // balancer alone planted his feet at running speed: legs frozen where the hit found them, sliding.
-        if (_startPose == StartPose.Stand && _downSince == 0f && !_staggering && moving >= RunStagger)
+        // with his weight thrown forward, the steps tiring until he catches himself or goes down. Its upright
+        // pull sets how many steps he gets (RunUpright): looser the faster he was going.
+        if (_startPose == StartPose.Stand && _downSince == 0f && !_staggering && moving >= _runSpeed)
         {
             _staggering = true;
+            _runUp = RunUpright(moving);
             Send("staggerFall", ("start", true), ("lowerBodyStiffness", 12f), ("lowerBodyStiffnessEnd", legBuckle ? 4f : 9f),
                  ("stepsTillStartEnd", legBuckle ? 4 : 7), ("staggerStepProb", 0.6f), ("leanInDirMaxF", 0.35f));
-            EuphoriaPlugin.Log($"Delirium: shot on the run ({moving:F1} m/s) - stagger");
+            EuphoriaPlugin.Log($"Delirium: shot on the run ({moving:F1} m/s) - stagger, upright {_runUp:F2}");
         }
         if (_downSince > 0f) { FallenPose(true); FallWaitStart(); } // shot on the ground: back into how he lies, the wait to get up starts over
         if (aimAt != null && !_aimBack && _gun != null && !GoingDown && !_catchFallSent && UnityEngine.Random.value < aimChance)
@@ -1557,7 +1596,7 @@ internal partial class NmBody : MonoBehaviour
         string was = body.parent != null ? body.parent.name : "none";
         body.SetParent(_p.gameObject.transform, true);
         body.SetPositionAndRotation(pos, rot);
-        int solid = GunCollidersDead(body);
+        int solid = GunCollidersDead(body, out int listed);
         Collider[] own = _p.GetComponentsInChildren<Collider>(false);
         foreach (Collider g in body.GetComponentsInChildren<Collider>(false))
             foreach (Collider c in own)
@@ -1571,20 +1610,32 @@ internal partial class NmBody : MonoBehaviour
         drop.angularVelocity = moving ? Vector3.ClampMagnitude(_gunSpin, GunLetGoMaxSpin) : Vector3.zero;
         drop.WakeUp();
         EuphoriaPlugin.Log($"Delirium: dead man's gun let go where he held it ({body.name}, out of {was}{(tied ? ", cut from the corpse" : "")}, " +
-                           $"{solid} solid collider(s), {drop.velocity.magnitude:F1} m/s) - left to its physics");
+                           $"{solid} solid collider(s){(listed > 0 ? $", {listed} EFT hadn't listed for the pickup - added" : "")}, " +
+                           $"{drop.velocity.magnitude:F1} m/s) - left to its physics");
         return true;
     }
 
     // The colliders EFT gave the dead man's gun for the floor (Player.DropItemDead: its pool object's solid
     // ones, on, on the Deadbody layer). The ones we switched off while he held it had been put back as they
     // were in his hands, off, after EFT turned them on: the gun fell through the ground.
-    private int GunCollidersDead(Transform body)
+    // Each one switched on is on its pool object's list (StoreCollider), as EFT's own are, so the pickup
+    // switches it off again. A bot killed mid-reaction had the gun in his palm when EFT made his corpse, which
+    // put every part of it on the Deadbody layer; a frame later EFT listed only what was in its weapon body,
+    // not the attachments (still in his hand). Those were switched on here and never off: whoever looted the
+    // gun wore live colliders, on his back or in his hands, that pushed him along.
+    private int GunCollidersDead(Transform body, out int listed)
     {
         _gunColliders.Clear(); // EFT's now: never put back to the hands' state
         int deadLayer = LayerMask.NameToLayer("Deadbody"), n = 0;
+        listed = 0;
         foreach (EFT.AssetsManager.AssetPoolObject apo in body.GetComponentsInChildren<EFT.AssetsManager.AssetPoolObject>(true))
             foreach (Collider c in apo.Colliders)
-                if (c != null && !c.isTrigger && c.gameObject.layer == deadLayer) { c.enabled = true; n++; }
+            {
+                if (c == null || c.isTrigger || c.gameObject.layer != deadLayer) continue;
+                if (!apo.RegisteredCollidersToDisable.Exists(r => r.Collider == c)) { apo.StoreCollider(c); listed++; } // as in his hands
+                c.enabled = true;
+                n++;
+            }
         return n;
     }
 
@@ -1959,6 +2010,7 @@ internal partial class NmBody : MonoBehaviour
             float moved = _haveSafeRoot ? Vector3.Distance(_p.Transform.position, _safeRoot) : 0f;
             if (_haveSafeRoot) MoveRoot(_safeRoot);
             EuphoriaPlugin.Log($"Delirium: runaway ({vmax:F0} m/s) — releasing, root put back {moved:F2} m");
+            if (PhysGetUpFallBack($"runaway {vmax:F0} m/s")) return; // getting up: the clip plays on alone, no snap to stand
             Release(true);
             _blending = false;
             if (_haveSafeRoot) BotActions.SyncMover(_p);
@@ -1986,7 +2038,7 @@ internal partial class NmBody : MonoBehaviour
         if (MatchTick(comSpeed)) return; // moving into the hand-back stance
         if (!inAir && SettleTick(comSpeed, vmax, h)) return; // resting close to a stance for a while: into it
         if (StuckTick(h)) return; // far too long since the last hit: closest stance
-        if (!inAir && StumbleSaveTick(h)) return; // going over close to upright: most of the time he catches himself
+        if (!inAir && OverTick(h)) return; // going over: he goes down, unless a safety net takes him (NmBodyRecover)
         // heights assume a standing body: scaled to where a crouched bot's COM started; a prone
         // bot is already down (stumble-only mode doesn't apply to him)
         if (!canFall && _startPose != StartPose.Prone)
@@ -2203,6 +2255,7 @@ internal partial class NmBody : MonoBehaviour
         LegTwistTick(_pgu ? "physical get-up" : _matching ? "stance match" : _dying ? "dying" : "doll's pose"); // diagnostic (NmBodyLegTwist)
         HoldGun();
         if (_matching) ReachSupportGrip(); // recovering: the free hand finds its place on the gun again
+        LimpDeadWrists(); // dying: the free hands' wrists ease to near straight, what the corpse keeps (NmBodyFingers)
         // what we gave the arms this frame, for the late pass to put back if the game re-poses them after us
         _armWritten = armsOn;
         if (armsOn) for (int k = 13; k < Parts; k++) if (_bones[k] != null) { _armWrite[k] = _bones[k].localRotation; _armWriteLocal[k] = _bones[k].localPosition; }

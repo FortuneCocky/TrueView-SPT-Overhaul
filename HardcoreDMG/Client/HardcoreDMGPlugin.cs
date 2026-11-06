@@ -8,11 +8,13 @@ using HardcoreDMGClient.Patches;
 using HarmonyLib;
 using SPT.Reflection.Patching;
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 
 namespace HardcoreDMGClient;
 
-[BepInPlugin("com.devin.hardcoredmg.client", "HardcoreDMG Client", "1.0.0")]
+[BepInPlugin("com.devin.hardcoredmg.client", "HardcoreDMG Client", "1.1.0")]
 public class HardcoreDMGPlugin : BaseUnityPlugin
 {
     public static ManualLogSource Log;
@@ -29,6 +31,17 @@ public class HardcoreDMGPlugin : BaseUnityPlugin
     public static ConfigEntry<float> HeavyBleedScale;
     public static ConfigEntry<float> LightBleedScale;
 
+    // Damage (Player) — the player's own damage scales
+    public static ConfigEntry<bool> PlayerDamageOn;
+    public static ConfigEntry<float> PlayerDamageScale;
+    public static ConfigEntry<float> PlayerHeadshotScale;
+    public static ConfigEntry<float> PlayerChestScale;
+    public static ConfigEntry<float> PlayerStomachScale;
+    public static ConfigEntry<float> PlayerArmScale;
+    public static ConfigEntry<float> PlayerLegScale;
+    public static ConfigEntry<float> PlayerHeavyBleedScale;
+    public static ConfigEntry<float> PlayerLightBleedScale;
+
     // Wound reactions
     public static ConfigEntry<bool> WeaponDropOn;
     public static ConfigEntry<float> WeaponDropOdds;
@@ -42,18 +55,13 @@ public class HardcoreDMGPlugin : BaseUnityPlugin
     public static ConfigEntry<float> ArmorEnergyLoss;
     public static ConfigEntry<float> RicochetScale;
 
-    // Prone/Crouch lock — prevents standing up when legs are damaged
-    public static ConfigEntry<bool> EnableProneLock;
-    public static ConfigEntry<float> ProneLockLegThreshold;
-    public static ConfigEntry<bool> EnableCrouchLock;
-    public static ConfigEntry<float> CrouchLockLegThreshold;
-
     // Leg Cripple — forces crouch/prone based on leg damage
     public static ConfigEntry<bool> EnableLegCripple;
+    public static ConfigEntry<bool> LegCrippleStayDown;
     public static ConfigEntry<bool> LegCrippleEnablePlayer;
     public static ConfigEntry<bool> LegCrippleEnableBots;
-    public static ConfigEntry<float> LegCrippleCrawlSpeed;
-    public static ConfigEntry<float> LegCrippleCrouchHealthThreshold;
+    public static ConfigEntry<float> LegCrippleCrouchBelow;
+    public static ConfigEntry<float> LegCrippleProneBelow;
 
     // Shotguns
     public static ConfigEntry<bool> ShotgunsOn;
@@ -73,7 +81,7 @@ public class HardcoreDMGPlugin : BaseUnityPlugin
         Log = Logger;
 
         const string model = "1. Damage Model";
-        const string reactions = "2. Wound Reactions";
+        const string reactions = "2. Wound Reactions (Player)";
         const string bullets = "3. Bullet Physics";
 
         DamageModelOn = Config.Bind(model, "Damage model active", true,
@@ -97,12 +105,33 @@ public class HardcoreDMGPlugin : BaseUnityPlugin
         LightBleedScale = Config.Bind(model, "Light bleed odds scale", 1.0f,
             new ConfigDescription("Scales the odds that a hit opens a light bleed.", new AcceptableValueRange<float>(0f, 3f), Array.Empty<object>()));
 
+        // Keys start with "Player" so they never match the main damage model keys.
+        const string playerDamage = "1. Damage Model (Player)";
+        PlayerDamageOn = Config.Bind(playerDamage, "Enable player damage settings", false,
+            "Hits on you use only the settings in this section and ignore the main damage model scales. Off = you take damage like everyone else.");
+        PlayerDamageScale = Config.Bind(playerDamage, "Player overall damage scale", 1.0f,
+            new ConfigDescription("Scales every bullet, melee and explosion hit on you. 1.0 = unchanged.", new AcceptableValueRange<float>(0.1f, 3f), Array.Empty<object>()));
+        PlayerHeadshotScale = Config.Bind(playerDamage, "Player headshot damage scale", 1.0f,
+            new ConfigDescription("Extra scale for head hits on you, on top of your overall scale.", new AcceptableValueRange<float>(0.1f, 3f), Array.Empty<object>()));
+        PlayerChestScale = Config.Bind(playerDamage, "Player chest damage scale", 1.0f,
+            new ConfigDescription("Scales chest hits on you, after the torso zone.", new AcceptableValueRange<float>(0.1f, 3f), Array.Empty<object>()));
+        PlayerStomachScale = Config.Bind(playerDamage, "Player stomach damage scale", 1.0f,
+            new ConfigDescription("Scales stomach hits on you, after the torso zone.", new AcceptableValueRange<float>(0.1f, 3f), Array.Empty<object>()));
+        PlayerArmScale = Config.Bind(playerDamage, "Player arm damage scale", 0.85f,
+            new ConfigDescription("Scales arm hits on you.", new AcceptableValueRange<float>(0.1f, 3f), Array.Empty<object>()));
+        PlayerLegScale = Config.Bind(playerDamage, "Player leg damage scale", 0.9f,
+            new ConfigDescription("Scales leg hits on you.", new AcceptableValueRange<float>(0.1f, 3f), Array.Empty<object>()));
+        PlayerHeavyBleedScale = Config.Bind(playerDamage, "Player heavy bleed odds scale", 1.0f,
+            new ConfigDescription("Scales the odds that a hit on you opens a heavy bleed.", new AcceptableValueRange<float>(0f, 3f), Array.Empty<object>()));
+        PlayerLightBleedScale = Config.Bind(playerDamage, "Player light bleed odds scale", 1.0f,
+            new ConfigDescription("Scales the odds that a hit on you opens a light bleed.", new AcceptableValueRange<float>(0f, 3f), Array.Empty<object>()));
+
         WeaponDropOn = Config.Bind(reactions, "Weapon drop on arm wounds", false,
-            "Lets a bad arm wound knock the weapon out of your hands. Off by default.");
+            "Lets a bad arm wound knock the weapon out of your hands. Player only. Off by default.");
         WeaponDropOdds = Config.Bind(reactions, "Weapon drop base odds percent", 2f,
             new ConfigDescription("Starting odds in percent. Bigger wounds compared with the arm's HP raise them, and hand or wrist hits count extra.", new AcceptableValueRange<float>(0f, 100f), Array.Empty<object>()));
-        WoundFallOn = Config.Bind(reactions, "Fall on leg wounds", true,
-            "A leg hit that leaves the leg below 35% HP can drop a bot prone, or the player when Leg Cripple > Enable for player is on.");
+        WoundFallOn = Config.Bind(reactions, "Fall on leg wounds", false,
+            "A leg hit that leaves your leg below 35% HP can knock you prone. Player only. Off by default.");
         WoundFallOdds = Config.Bind(reactions, "Fall base odds percent", 25f,
             new ConfigDescription("Starting odds in percent. Lower leg HP and bigger wounds raise them, and thigh hits count extra.", new AcceptableValueRange<float>(0f, 100f), Array.Empty<object>()));
 
@@ -117,27 +146,22 @@ public class HardcoreDMGPlugin : BaseUnityPlugin
         RicochetScale = Config.Bind(bullets, "Ricochet odds scale", 1.3f,
             new ConfigDescription("Scales how often bullets glance off at shallow angles. 1.0 = unchanged.", new AcceptableValueRange<float>(0.5f, 3f), Array.Empty<object>()));
 
-        // === Stance lock ===
-        EnableProneLock = Config.Bind("4. Stance Lock", "Enable prone lock", true,
-            "When enabled, prevents bots and player from standing up from prone when leg HP is below the threshold. They must heal legs to get up. The player is only affected when Leg Cripple > Enable for player is on.");
-        ProneLockLegThreshold = Config.Bind("4. Stance Lock", "Prone lock leg HP threshold", 30f,
-            new ConfigDescription("Leg HP percentage below which you cannot stand up from prone. 30 = if either leg is below 30% max HP, you stay prone.", new AcceptableValueRange<float>(0f, 100f), Array.Empty<object>()));
-        EnableCrouchLock = Config.Bind("4. Stance Lock", "Enable crouch lock", true,
-            "When enabled, prevents bots and player from standing up from crouch when leg HP is below the threshold. They must heal legs to stand fully upright. The player is only affected when Leg Cripple > Enable for player is on.");
-        CrouchLockLegThreshold = Config.Bind("4. Stance Lock", "Crouch lock leg HP threshold", 15f,
-            new ConfigDescription("Leg HP percentage below which you cannot stand up from crouch. 15 = if either leg is below 15% max HP, you stay crouched.", new AcceptableValueRange<float>(0f, 100f), Array.Empty<object>()));
-
         // === Leg Cripple ===
-        EnableLegCripple = Config.Bind("5. Leg Cripple", "Enable leg cripple", true,
-            "Master toggle for the leg cripple system. When leg HP is low, the actor is forced into crouch; when both legs are blacked, the actor is forced into prone and crawl speed is reduced.");
-        LegCrippleEnablePlayer = Config.Bind("5. Leg Cripple", "Enable for player", false,
-            "Lets leg wounds limit the local player: leg cripple, stance lock and falls from leg hits. Off = these only affect bots.");
-        LegCrippleEnableBots = Config.Bind("5. Leg Cripple", "Enable for bots", true,
+        const string cripple = "5. Leg Cripple";
+        EnableLegCripple = Config.Bind(cripple, "Enable leg cripple", false,
+            "Master toggle for the leg cripple system. Wounded legs force the actor into crouch, and badly wounded legs into prone. Everything else in this section needs it on. Off by default.");
+        LegCrippleStayDown = Config.Bind(cripple, "Stay down until healed", true,
+            "A crippled bot or player can't get back up past what their legs allow: they stay prone while both legs are below the prone threshold, and crouched while either leg is below the crouch threshold. They get up once healed or on painkillers. Needs leg cripple on.");
+        LegCrippleEnablePlayer = Config.Bind(cripple, "Enable for player", false,
+            "Lets leg cripple limit the local player. Off = it only affects bots.");
+        LegCrippleEnableBots = Config.Bind(cripple, "Enable for bots", true,
             "Apply leg cripple effects to AI bots (PMCs, scavs, etc.).");
-        LegCrippleCrawlSpeed = Config.Bind("5. Leg Cripple", "Crawl speed", 0.15f,
-            new ConfigDescription("Movement speed multiplier when forced to crawl with both legs blacked. 0.15 = very slow crawl, 0.5 = faster crawl.", new AcceptableValueRange<float>(0.05f, 0.5f), Array.Empty<object>()));
-        LegCrippleCrouchHealthThreshold = Config.Bind("5. Leg Cripple", "Crouch health threshold", 0.2f,
-            new ConfigDescription("When leg health drops below this fraction (0-1) of max, the player/bot is forced into crouch. 0.3 = crouch at 30% leg health.", new AcceptableValueRange<float>(0f, 0.9f), Array.Empty<object>()));
+        LegCrippleCrouchBelow = Config.Bind(cripple, "Crouch below leg HP percent", 20f,
+            new ConfigDescription("When either leg drops below this share of its max HP, or is blacked, the actor is forced into crouch.", new AcceptableValueRange<float>(0f, 90f), Array.Empty<object>()));
+        LegCrippleProneBelow = Config.Bind(cripple, "Prone below leg HP percent", 10f,
+            new ConfigDescription("When both legs drop below this share of their max HP, the actor is forced prone. A blacked leg always counts as below it, so two blacked legs always mean prone.", new AcceptableValueRange<float>(0f, 90f), Array.Empty<object>()));
+
+        MigrateOldSettings();
 
         // === Shotguns ===
         const string shotguns = "6. Shotguns";
@@ -192,6 +216,52 @@ public class HardcoreDMGPlugin : BaseUnityPlugin
         if (EnableLegCripple.Value)
         {
             Log.LogInfo("HardcoreDMG Client — leg cripple system enabled (player: " + LegCrippleEnablePlayer.Value + ", bots: " + LegCrippleEnableBots.Value + ")");
+        }
+    }
+
+    /// <summary>
+    /// Carries values over from settings that moved or were replaced, and
+    /// drops the ones that are gone, so updating keeps a player's choices and
+    /// leaves no dead entries in the cfg. BepInEx keeps unbound entries in its
+    /// OrphanedEntries until they are bound or removed.
+    /// </summary>
+    private void MigrateOldSettings()
+    {
+        try
+        {
+            if (AccessTools.Property(typeof(ConfigFile), "OrphanedEntries")?.GetValue(Config) is not Dictionary<ConfigDefinition, string> orphans ||
+                orphans.Count == 0)
+                return;
+
+            string Take(string section, string key)
+            {
+                var def = new ConfigDefinition(section, key);
+                if (!orphans.TryGetValue(def, out string value)) return null;
+                orphans.Remove(def);
+                return value;
+            }
+
+            const string oldReactions = "2. Wound Reactions";
+            foreach (ConfigEntryBase entry in new ConfigEntryBase[] { WeaponDropOn, WeaponDropOdds, WoundFallOn, WoundFallOdds })
+            {
+                string value = Take(oldReactions, entry.Definition.Key);
+                if (value != null) entry.SetSerializedValue(value);
+            }
+
+            // The crouch threshold was a 0-1 fraction; it is a percent now.
+            string crouch = Take("5. Leg Cripple", "Crouch health threshold");
+            if (float.TryParse(crouch, NumberStyles.Float, CultureInfo.InvariantCulture, out float fraction))
+                LegCrippleCrouchBelow.Value = fraction * 100f;
+
+            Take("5. Leg Cripple", "Crawl speed");
+            foreach (string key in new[] { "Enable prone lock", "Prone lock leg HP threshold", "Enable crouch lock", "Crouch lock leg HP threshold" })
+                Take("4. Stance Lock", key);
+
+            Config.Save();
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning($"HardcoreDMG Client — could not carry over old settings: {ex.Message}");
         }
     }
 

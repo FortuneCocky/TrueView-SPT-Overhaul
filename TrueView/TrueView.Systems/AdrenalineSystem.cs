@@ -143,9 +143,10 @@ internal static class AdrenalineSystem
         if (_nextBeat <= 0f && !_heartSource.isPlaying)
         {
             _heartSource.clip = _heartClip;
-            // A heavy exhale covers the heart a little. A harder-pumping
-            // heart lands a touch higher; no two beats quite alike.
-            _heartSource.volume = Mathf.Clamp01(volume * 1.6f * BreathingSystem.HeartMask * UnityEngine.Random.Range(0.9f, 1f));
+            // A heavy exhale covers the heart a little, your own voice a lot.
+            // A harder-pumping heart lands a touch higher; no two beats quite alike.
+            float voice = Mathf.Lerp(0.35f, 1f, AudioPriority.VoiceDuck);
+            _heartSource.volume = Mathf.Clamp01(volume * 1.6f * BreathingSystem.HeartMask * voice * UnityEngine.Random.Range(0.9f, 1f));
             _heartSource.pitch = Mathf.Lerp(0.95f, 1.05f, strength) * UnityEngine.Random.Range(0.98f, 1.02f);
             _heartSource.Play();
             // Shot at: up to ~95 bpm. Hit: up to ~140 bpm. The calm-down

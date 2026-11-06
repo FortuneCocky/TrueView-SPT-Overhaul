@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using EFT;
 using EFT.Ballistics;
 using UnityEngine;
@@ -76,6 +77,9 @@ internal partial class NmBody
     private static float HeightAbove(Vector3 p) =>
         RayWorld(p + Vector3.up * 0.2f, Vector3.down, 40f, out RaycastHit h) ? p.y - h.point.y : p.y;
 
+    private static readonly FieldInfo LastDamageField =
+        typeof(Player).GetField("LastDamageInfo", BindingFlags.Instance | BindingFlags.NonPublic);
+
     private void Hurt(float speed, float safe, string why)
     {
         float excess = 0.5f * ImpactMass * (speed * speed - safe * safe);
@@ -92,6 +96,13 @@ internal partial class NmBody
                 HitNormal = Vector3.up,
                 PenetrationPower = 0f,
             };
+            // The game credits a death to whoever dealt the last damage. A fall with no shooter would clear
+            // that and the kill would read "Died", so the fall carries the last shooter and his weapon.
+            if (LastDamageField?.GetValue(_p) is DamageInfo last && last.Player != null)
+            {
+                di.Player = last.Player;
+                di.Weapon = last.Weapon;
+            }
             _p.ApplyDamageInfo(di, EBodyPart.Chest, EBodyPartColliderType.SpineTop, 0f);
             EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} {why} - {dmg:F0} damage");
         }

@@ -73,7 +73,7 @@ public partial class BloodManager : MonoBehaviour
     private float _load = 1f, _fastDt, _slowDt;
     private readonly PendingDrop[] _pendingDrops = new PendingDrop[PendingDropSlots];
     private int _pendingDropNext;
-    private static readonly Color WoundBase = new Color(0.55f, 0.03f, 0.025f, 1f);
+    private static readonly Color WoundBase = new Color(0.5f, 0.025f, 0.035f, 1f); // deep maroon torn flesh, as in the reference
     private static readonly Color ArmorBase = new Color(0.42f, 0.42f, 0.4f, 0.92f);
     private readonly Pending[] _pending = new Pending[PendingSlots];
     private readonly float[] _dripEnd = new float[WoundSlots];
@@ -501,16 +501,17 @@ public partial class BloodManager : MonoBehaviour
         if (_cfg.WoundDecals.Value && di.HitCollider != null && dist <= maxDist)
         {
             Vector3 face = BodyFacing(ref di, dir);
-            // a real entry wound: a ~1.5 cm hole in a dark ring, 3.5-6 cm across in all (fragments a bit smaller)
-            float size = Mathf.Clamp(Random.Range(0.035f, 0.05f) * Mathf.Sqrt(power), 0.03f, 0.06f) * (blast ? 0.75f : 1f);
-            bool run = Random.value < 0.45f;
-            float runLen = Mathf.Clamp(size * Random.Range(1.5f, 2.6f) * Mathf.Clamp(power, 0.7f, 1.3f), 0.05f, 0.12f);
+            // the reference wound: a dark hole in a lumpy burst of torn flesh 5-8 cm across, and a thick trickle
+            // that always runs down from it over a few seconds (fragments a bit smaller)
+            float size = Mathf.Clamp(Random.Range(0.05f, 0.07f) * Mathf.Sqrt(power), 0.045f, 0.08f) * (blast ? 0.75f : 1f);
+            bool run = true;
+            float runLen = Mathf.Clamp(size * Random.Range(1f, 1.5f) * Mathf.Clamp(power, 0.8f, 1.2f), 0.05f, 0.12f);
             int woundCell = BloodTextures.WoundCell0 + Random.Range(0, BloodTextures.WoundCells);
             int runCell = BloodTextures.RunCell0 + Random.Range(0, BloodTextures.RunCells);
             if (!(_cfg.ConformMarks.Value && _marks.TryAdd(victim, di.HitCollider.transform, pt, dir, size, woundCell,
-                    Tint(WoundBase, light, 1f), _cfg.DecalLifetime.Value * 2f, run ? runLen : 0f, size * 0.26f, runCell, now)))
+                    Tint(WoundBase, light, 1f), _cfg.DecalLifetime.Value * 2f, run ? runLen : 0f, size * 0.3f, runCell, now)))
                 _body.Add(di.HitCollider.transform, pt + face * _cfg.BodyDecalOffset.Value, face, size, woundCell, BodyDecals.ProfileWound,
-                    0.035f, Tint(WoundBase, light, 1f), _cfg.DecalLifetime.Value * 2f, run, runLen, Random.Range(2f, 5f), runCell, now);
+                    0.035f, Tint(WoundBase, light, 1f), _cfg.DecalLifetime.Value * 2f, run, runLen, Random.Range(2.5f, 3.5f), runCell, now);
         }
         if (ballistic && _cfg.WoundDrips.Value && di.HitCollider != null && dist <= maxDist)
         {
@@ -1010,7 +1011,7 @@ public partial class BloodManager : MonoBehaviour
         p.Incoming = incoming;
     }
 
-    private int StuckCapacity() => _tier.Decals * 6;
+    private int StuckCapacity() => _tier.Decals * 10;  // every landing drop leaves a bead, so this one fills fastest
     private int _landedThisFrame;
 
     /// <summary>A flying blob touched the world: it stays there as a bead, tail pointing the way it slid.</summary>
@@ -1025,9 +1026,9 @@ public partial class BloodManager : MonoBehaviour
         Color col = (Color)Tint(StreamBase, LightAt(pos, normal) * Random.Range(0.75f, 1f), 1f);
         _stuck.Add(pos, normal, slide, r, el, col, _cfg.DecalLifetime.Value, Time.time);
     }
-    private int PuddleCapacity() => _tier.Wounds * 2;
-    private int SplatCapacity() => _tier.Wounds * 5;
-    private int TrailCapacity() => _tier.Wounds * 2;
+    private int PuddleCapacity() => _tier.Wounds * 4;
+    private int SplatCapacity() => _tier.Wounds * 8;
+    private int TrailCapacity() => _tier.Wounds * 3;
     private int BrainCapacity() => _tier.Wounds * 10;
 
     /// <summary>

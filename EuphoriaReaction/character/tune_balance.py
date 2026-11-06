@@ -6,7 +6,7 @@ balance values are then searched until ours does the same. Only the behaviour is
 of the reference's files, and they are never copied, written or shipped. The output is our own values:
 
     python tune_balance.py ref  <dir>          # measure the reference (dir holds its .xrt, build and params)
-    python tune_balance.py ours                # measure ours as it is (body.json + presets/balance_engine.txt)
+    python tune_balance.py ours                # measure ours as it is (body.json + the engine's own task values)
     python tune_balance.py tune <dir> [-n N]   # search; writes tuned_body.json and tuned_balance.txt here
 
 ref.json (the reference's measurements) stays next to this script, and is git-ignored like the reference.

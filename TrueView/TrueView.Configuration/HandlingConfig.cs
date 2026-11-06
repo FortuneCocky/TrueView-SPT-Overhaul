@@ -19,7 +19,7 @@ internal static class HandlingConfig
 
 	private const string DeadzoneSection = "04 - ADS Weapon Handling";
 
-	private const string ShotSection = "07 - Recoil & Shot Response";
+	private const string ShotSection = "07 - Recoil";
 
 	private const string CameraSection = "08 - Camera Sway";
 
@@ -97,9 +97,11 @@ internal static class HandlingConfig
 	public static ConfigEntry<float> MuzzleLead { get; private set; }
 	public static ConfigEntry<float> TurnRollAmount { get; private set; }
 
-	public static ConfigEntry<float> ShotMisalignmentStrength { get; private set; }
+	public static ConfigEntry<float> ShotPush { get; private set; }
 
-	public static ConfigEntry<float> ShotMisalignmentMax { get; private set; }
+	public static ConfigEntry<float> GameRecoilHip { get; private set; }
+
+	public static ConfigEntry<float> GameRecoilStance { get; private set; }
 
 	public static ConfigEntry<float> ShotBreathPenalty { get; private set; }
 
@@ -146,6 +148,11 @@ internal static class HandlingConfig
 	public static ConfigEntry<float> BodyCamExertion { get; private set; }
 	public static ConfigEntry<float> BodyCamTilt { get; private set; }
 	public static ConfigEntry<float> BodyCamAdsFade { get; private set; }
+	public static ConfigEntry<float> BodyCamMountHeight { get; private set; }
+	public static ConfigEntry<float> BodyCamMountSide { get; private set; }
+	public static ConfigEntry<float> BodyCamChestFollow { get; private set; }
+	public static ConfigEntry<float> BodyCamUnstabilised { get; private set; }
+	public static ConfigEntry<float> BodyCamStockBump { get; private set; }
 	public static ConfigEntry<float> HandKick { get; private set; }
 	public static ConfigEntry<bool> FluidMovementEnabled { get; private set; }
 	public static ConfigEntry<float> FluidAimReduction { get; private set; }
@@ -167,6 +174,24 @@ internal static class HandlingConfig
 	public static ConfigEntry<bool> FovScalesDeadzone { get; private set; }
 	public static ConfigEntry<float> CameraPullBack { get; private set; }
 	public static ConfigEntry<float> AdsPullBack { get; private set; }
+
+	public static ConfigEntry<bool> LensEnabled { get; private set; }
+	public static ConfigEntry<float> LensIntensity { get; private set; }
+	public static ConfigEntry<float> LensIntensityX { get; private set; }
+	public static ConfigEntry<float> LensIntensityY { get; private set; }
+	public static ConfigEntry<float> LensScale { get; private set; }
+	public static ConfigEntry<bool> LensVignetteEnabled { get; private set; }
+	public static ConfigEntry<float> LensVignetteIntensity { get; private set; }
+	public static ConfigEntry<float> LensVignetteSmoothness { get; private set; }
+	public static ConfigEntry<float> LensVignetteRoundness { get; private set; }
+	public static ConfigEntry<bool> LensChromaticEnabled { get; private set; }
+	public static ConfigEntry<float> LensChromaticIntensity { get; private set; }
+	public static ConfigEntry<bool> LensBodycamFrame { get; private set; }
+	public static ConfigEntry<float> LensBodycamFrameIntensity { get; private set; }
+	public static ConfigEntry<bool> LensFaceCoverEnabled { get; private set; }
+	public static ConfigEntry<bool> LensFaceCoverVisor { get; private set; }
+	public static ConfigEntry<float> LensFaceCoverIntensity { get; private set; }
+	public static ConfigEntry<float> LensFaceCoverTransition { get; private set; }
 	public static ConfigEntry<bool> DynamicFovEnabled { get; private set; }
 	public static ConfigEntry<float> DynamicFovAds { get; private set; }
 
@@ -183,6 +208,9 @@ internal static class HandlingConfig
 	public static ConfigEntry<float> AdrenalineHeartbeat { get; private set; }
 	public static ConfigEntry<float> AdrenalineDecay { get; private set; }
 	public static ConfigEntry<float> BreathingVolume { get; private set; }
+	public static ConfigEntry<float> SprintBreathingVolume { get; private set; }
+	public static ConfigEntry<float> ExhaustedBreathingVolume { get; private set; }
+	public static ConfigEntry<float> MaskMuffle { get; private set; }
 	public static ConfigEntry<float> CalmDownLength { get; private set; }
 	public static ConfigEntry<float> CalmDownVolume { get; private set; }
 
@@ -198,6 +226,10 @@ internal static class HandlingConfig
 
 
 
+	// A recoil setting: always shown, in the given order (higher first).
+	private static ConfigDescription R(string desc, float min, float max, int order) =>
+		new(desc, new AcceptableValueRange<float>(min, max), new ConfigurationManagerAttributes { Order = order, IsAdvanced = false });
+
 	private static ConfigDescription D(string desc, float min, float max, bool advanced = true)
 	{
 		return new ConfigDescription(desc, new AcceptableValueRange<float>(min, max),
@@ -211,9 +243,14 @@ internal static class HandlingConfig
 
 	public static float ShotJoltScale => RecoilDisabled ? 0f : BodyCamShotJolt?.Value ?? 1f;
 	public static float HandKickScale => RecoilDisabled ? 0f : HandKick?.Value ?? 0f;
-	public static bool ShotMisalignmentOn => !RecoilDisabled && ShotMisalignmentStrength.Value > 0f;
-	public static float ShotMisalignmentStrengthValue => ShotMisalignmentStrength.Value;
-	public static float ShotMisalignmentMaxValue => ShotMisalignmentMax.Value;
+	public static bool RecoilOn => !RecoilDisabled;
+	// The game's own recoil force for a shot fired without aiming (1 = untouched).
+	public static float GameRecoilScale(bool stanceFire) =>
+		RecoilDisabled ? 1f : (stanceFire ? GameRecoilStance?.Value : GameRecoilHip?.Value) ?? 1f;
+	// Shot push fuses the old Strength (1.2) and Maximum per shot (1.5 deg) settings.
+	public static bool ShotMisalignmentOn => !RecoilDisabled && ShotPush.Value > 0f;
+	public static float ShotMisalignmentStrengthValue => 1.2f * ShotPush.Value;
+	public static float ShotMisalignmentMaxValue => System.Math.Max(0.1f, 1.5f * ShotPush.Value);
 
 	// Fused strengths. 1 = the tuned values of the settings they replaced.
 	public const float DefaultHipBend = 1.619718f;
@@ -233,15 +270,19 @@ internal static class HandlingConfig
 		Enabled = config.Bind("01 - General", "Enable mod", true, Toggle("Master switch. When off, all handling systems leave the vanilla values untouched."));
 		VerboseLogging = config.Bind("01 - General", "Verbose logging", false, "Log recalculated weapon handling values to the BepInEx console.");
 		SprintCancelAds = config.Bind("01 - General", "Cancel sprint to ADS on right click", true, "Pressing right mouse while sprinting cancels sprint and immediately aims down sights.");
-		BodyCamEnabled = config.Bind("02 - Body Camera", "Enable body camera", true, Toggle("Chest-mounted body camera: the view rides your torso, not the gun. Steps, turns, shots and breathing move the camera while the gun moves on its own in the frame. Applied only while the frame is drawn, so it never feeds back into the weapon or the deadzone."));
-		BodyCamStepBounce = config.Bind("02 - Body Camera", "Step bounce", 1f, D("Drop, dip and roll onto the planted foot on each step, scaled by speed. 0 = off, 1 = natural, 2 = heavy.", 0f, 2f, false));
-		BodyCamIrregularity = config.Bind("02 - Body Camera", "Step irregularity", 0.5f, D("How much each step differs from the last, plus a slow wander, so walking never looks like a clean sine. 0 = even, 1 = rough.", 0f, 1f, true));
-		BodyCamTurnLag = config.Bind("02 - Body Camera", "Turn lag", 1f, D("The chest arrives late on turns, so the gun leads across the frame. 0 = off, 1 = natural, 2 = loose.", 0f, 2f, false));
-		BodyCamShotJolt = config.Bind("02 - Body Camera", "Shot jolt", 1.2f, D("Camera shake when you fire. Each shot kicks the view up with a slight twist, then it settles in about 0.15 s (it never climbs like recoil). Heavier guns, tired arms and head or torso injuries kick harder; recoil skill and holding your breath soften it. Needs the body camera on, and fades out while aiming (see ADS fade). 0 = no shot shake, 1 = natural, 2 = strong.", 0f, 2f, false));
-		BodyCamBreath = config.Bind("02 - Body Camera", "Breathing", 0.3f, D("Chest rise and fall with your breathing, deeper when out of breath. 0 = off, 1 = strong.", 0f, 2f, true));
-		BodyCamExertion = config.Bind("02 - Body Camera", "Exertion response", 1f, D("How much low stamina deepens and quickens your breathing, both the sound and the chest motion. 0 = breathing stays calm, 2 = heavy post-sprint recovery.", 0f, 2f, true));
-		BodyCamTilt = config.Bind("02 - Body Camera", "Mount tilt (deg)", 0.6f, D("Slow drifting tilt, like a camera that never sits quite level on a moving chest. 0 = always level.", 0f, 3f, true));
-		BodyCamAdsFade = config.Bind("02 - Body Camera", "ADS fade", 1f, D("How much of the body camera fades out while aiming down sights. 1 = all of it, which keeps the optic picture lined up. Hit and flinch knocks always play.", 0f, 1f, true));
+		BodyCamEnabled = config.Bind("02 - Body Camera", "Enable body camera", true, Toggle("Chest-mounted body camera: the view rides your torso, not the gun. Steps, turns, shots and breathing move the camera while the gun moves on its own in the frame. Applied only while the frame is drawn, so it never feeds back into the weapon or the deadzone. Every setting below marked \"Body camera on >\" does nothing while this is off. Hit knocks and near-miss flinches (15 - Combat Feedback) and the breathing sound still work without it."));
+		BodyCamStepBounce = config.Bind("02 - Body Camera", "Step bounce", 1f, D("Body camera on > Drop, dip and roll onto the planted foot on each step, scaled by speed. 0 = off, 1 = natural, 2 = heavy.", 0f, 2f, false));
+		BodyCamIrregularity = config.Bind("02 - Body Camera", "Step irregularity", 0.5f, D("Body camera on > How much each step differs from the last, plus a slow wander, so walking never looks like a clean sine. 0 = even, 1 = rough.", 0f, 1f, true));
+		BodyCamTurnLag = config.Bind("02 - Body Camera", "Turn lag", 1f, D("Body camera on > The chest arrives late on turns, so the gun leads across the frame. 0 = off, 1 = natural, 2 = loose.", 0f, 2f, false));
+		BodyCamBreath = config.Bind("02 - Body Camera", "Breathing", 0.3f, D("Body camera on > Chest rise and fall with your breathing, deeper when out of breath. 0 = off, 1 = strong.", 0f, 2f, true));
+		BodyCamExertion = config.Bind("02 - Body Camera", "Exertion response", 1f, D("How much low stamina deepens and quickens your breathing. The sound works either way; the chest motion needs the body camera on. 0 = breathing stays calm, 2 = heavy post-sprint recovery.", 0f, 2f, true));
+		BodyCamTilt = config.Bind("02 - Body Camera", "Mount tilt (deg)", 0.6f, D("Body camera on > Slow drifting tilt, like a camera that never sits quite level on a moving chest. 0 = always level.", 0f, 3f, true));
+		BodyCamAdsFade = config.Bind("02 - Body Camera", "ADS fade", 1f, D("Body camera on > How much of the body camera fades out while aiming down sights. 1 = all of it, which keeps the optic picture lined up. Hit and flinch knocks always play.", 0f, 1f, true));
+		BodyCamMountHeight = config.Bind("02 - Body Camera", "Mount height (cm)", 8f, D("Body camera on > How far below your eyes the camera sits, on your chest. You look down the gun from under it and see more of your arms. Shots still go where your deadzone points. Less when prone, and always back at the eye while aiming down sights so the sight picture stays exact. 0 = eye level, 8 = upper chest, 15 = mid chest (the gun may start to block the view).", 0f, 15f, false));
+		BodyCamMountSide = config.Bind("02 - Body Camera", "Mount side (cm)", 0f, D("Body camera on > Moves the camera across your chest. Negative = left, positive = right, 0 = centre. Back at the eye while aiming down sights.", -10f, 10f, false));
+		BodyCamChestFollow = config.Bind("02 - Body Camera", "Chest follows gun", 0.35f, D("Body camera on > Your chest turns with the gun, so the view swings part of the way toward wherever the gun points inside your deadzone, a moment late. Reads the deadzone live: a wider Weapon lag limit or looser follow lets the gun drift further and the chest follows further. Only changes the picture, not where the gun points. Off while aiming, sprinting, in free look and while a stance mod holds the gun. 0 = off (the gun moves freely in a fixed frame), 0.35 = natural, 1 = the gun stays centred.", 0f, 1f, false));
+		BodyCamUnstabilised = config.Bind("02 - Body Camera", "Unstabilised body", 1f, D("Body camera on > Your head keeps the horizon level, a chest doesn't. Leaning (Q/E) rolls the view further with your torso, sprinting pitches the chest forward, and landing from a jump or drop jars the camera, harder the further you fell. 0 = off, 1 = natural, 2 = strong.", 0f, 2f, false));
+		BodyCamStockBump = config.Bind("02 - Body Camera", "Stock bump", 1f, D("Body camera on > Bringing the gun up to aim pushes the stock into your vest and knocks the camera slightly; lowering it gives a smaller knock. Over in about a fifth of a second, and never through magnified scopes. 0 = off, 1 = natural, 2 = strong.", 0f, 2f, false));
 		HipDeadzoneEnabled = config.Bind("03 - Deadzone", "Enable hip deadzone", true, Toggle("Hip deadzone. The camera follows player input while the weighted weapon trails behind it."));
 		HipCameraFollowZone = config.Bind("03 - Deadzone", "Weapon lag limit (deg)", 14.5f, new ConfigDescription("Maximum angle the weapon can trail behind the camera during hip fire.", new AcceptableValueRange<float>(1f, 30f)));
 		HipDeadzoneInfluence = config.Bind("03 - Deadzone", "Deadzone influence", 0.2535211f, D("How much player movement/turning adds procedural drift to the weapon. 0 = none, 1 = maximum sway.", 0f, 1f, true));
@@ -284,18 +325,39 @@ internal static class HandlingConfig
 		StaminaSwayInfluence = config.Bind("06 - Weapon Sway & Inertia", "Stamina influence", 1f, D("How much drained arm stamina, oxygen and stamina add to sway. Arm stamina bites gently at first and hard near empty: at 0 the sway is about three times normal.", 0f, 2f, true));
 		TremorMultiplier = config.Bind("06 - Weapon Sway & Inertia", "Tremor multiplier", 0.1f, D("Multiplier on hand shake / tremor intensity.", 0.1f, 4f, true));
 		ArmTremor = config.Bind("06 - Weapon Sway & Inertia", "Tired arms tremor", 1.5f, D("Shaking hands as arm stamina runs out: starts around 35%, clearly visible near empty, on top of the tremor multiplier. Holding breath while aiming steadies it. 0 = off, 3 = violent.", 0f, 4f, false));
-		HipSwayMultiplier = config.Bind("07 - Recoil & Shot Response", "Recoil intensity", 0.3286385f, D("How chaotic recoil is while hip firing. 0 = vanilla-calm, 1 = very chaotic.", 0f, 1f, true));
-		HandKick = config.Bind("07 - Recoil & Shot Response", "Hand kick", 1f, D("Each shot kicks the gun up and back about the grip and it snaps back in about 0.1 s. Hip fire only, fades out in ADS. 0 = off, 1 = natural, 2 = strong.", 0f, 2f, false));
-		ShotMisalignmentStrength = config.Bind("07 - Recoil & Shot Response", "Strength", 1.2f, D("Every shot nudges the weapon out of alignment, scaled by weight and ergonomics: the impulse applied to the hands rotation spring per shot. 0 = off.", 0f, 4f, true));
-		ShotMisalignmentMax = config.Bind("07 - Recoil & Shot Response", "Maximum per shot (deg)", 1.5f, D("Clamp on a single shot's misalignment impulse.", 0.1f, 10f, true));
-		ShotBreathPenalty = config.Bind("07 - Recoil & Shot Response", "Accuracy loss per shot", 0.95f, D("Multiplier on the vanilla breath amplitude gain applied per shot.", 0f, 3f, true));
-		StaminaShotInfluence = config.Bind("07 - Recoil & Shot Response", "Stamina recoil influence", 3f, D("How much drained hands stamina increases shot misalignment and recoil shake.", 0f, 3f, true));
-		DisableTrueViewRecoil = config.Bind("07 - Recoil & Shot Response", "Disable TrueView recoil", false, Toggle("Turns off every recoil effect TrueView adds, in one switch: Shot jolt, Hand kick and shot misalignment (with its accuracy loss and stamina influence). Their own settings are kept for when you switch this back off. Only TrueView's extras are removed; the game's own recoil always plays as normal."));
+		DisableTrueViewRecoil = config.Bind(ShotSection, "Disable TrueView recoil", false, Toggle("One switch for everything below except Hip fire shake: the game's recoil goes back to its own amount, and Camera kick, Hand kick, Shot push, Sway per shot and the Tired arms effect turn off. Your settings are kept for when you switch it back off. Hip fire shake stays, since it is also how the gun sits at the hip."));
+		GameRecoilHip = config.Bind(ShotSection, "Game recoil, hip", 1f, R("The game's own recoil when you fire without aiming down sights. Aimed recoil is never changed. 1 = the game's amount, 0.5 = half, 0 = none.", 0f, 1.5f, 100));
+		bool stanceRecoilNew = !(Orphans(config)?.Contains(new ConfigDefinition(ShotSection, "Game recoil, stance fire")) ?? true);
+		GameRecoilStance = config.Bind(ShotSection, "Game recoil, stance fire", 0.75f, R("Needs Tactical Stances. The game's own recoil when you fire from Active Aim or Canted Aim (also a shot from Low or High Ready that brings the gun up), in place of Game recoil, hip. A braced stance kicks less. 1 = the game's amount, 0.5 = half, 0 = none.", 0f, 1.5f, 95));
+		BodyCamShotJolt = config.Bind(ShotSection, "Camera kick", 1.2f, R("How hard your view jolts each time you fire: a quick kick up with a slight twist that settles in about 0.15 s and never climbs. Needs the body camera on (02), and fades out while aiming (02 - ADS fade). 0 = off, 1 = natural, 2 = strong.", 0f, 2f, 90));
+		HandKick = config.Bind(ShotSection, "Hand kick", 1f, R("How hard the gun kicks up and back in your hands on each shot; it snaps back in about 0.1 s. Hip fire only, fades out as you aim. 0 = off, 1 = natural, 2 = strong.", 0f, 2f, 80));
+		ShotPush = config.Bind(ShotSection, "Shot push", 1f, R("How far each shot pushes the muzzle off your aim, mostly up and a little sideways, before your hands bring it back. Heavy, low-ergonomics guns push more; aiming, holding your breath and recoil skill push less. 0 = off, 1 = natural, 2 = strong.", 0f, 2f, 70));
+		ShotBreathPenalty = config.Bind(ShotSection, "Sway per shot", 0.95f, R("How much each shot adds to the weapon's sway, so sustained fire gets harder to hold on target. It settles once you stop. 0 = the game's own amount, 1 = double, 3 = four times.", 0f, 3f, 60));
+		HipSwayMultiplier = config.Bind(ShotSection, "Hip fire shake", 0.3286385f, R("How loose the gun is at the hip: how far shots throw it around, and how much it wanders while you hold it there. 0 = steady, 1 = very chaotic.", 0f, 1f, 50));
+		StaminaShotInfluence = config.Bind(ShotSection, "Tired arms effect", 3f, R("How much drained arm stamina makes Shot push and Sway per shot worse. At 3, empty arms push up to four times as far. 0 = stamina makes no difference.", 0f, 3f, 40));
 		FovOverride = config.Bind("09 - Field of View", "Override game FOV", false, Toggle("Use the Field of view slider below instead of the game's own setting (which stops at 75). Off = the game's setting, untouched. The game's own changes still play from your new FOV: sprinting narrows it by 10, iron sights and red dots zoom in by the usual amount, and magnified optics keep their own view. Focus zoom and the adrenaline pinch scale with it, and the arms are pulled in the way the game does at 75."));
 		FieldOfView = config.Bind("09 - Field of View", "Field of view", 75, new ConfigDescription("Hip-fire field of view in degrees (vertical, like the game's setting), used while Override game FOV is on. 75 = the game's widest; 85-95 = a wider look; above 100 the edges stretch.", new AcceptableValueRange<int>(50, 110), new ConfigurationManagerAttributes { Order = 900 }));
 		FovScalesDeadzone = config.Bind("09 - Field of View", "Deadzone follows FOV", false, new ConfigDescription("Off (default): the deadzone, weapon lag and vertical follow stay in real degrees, so the gun aims and trails the same at any FOV; at a wider FOV it just looks smaller on screen. On: they are resized so the gun moves across the screen as far as it did at the game's own FOV setting (more degrees when wider, fewer when narrower). Needs Override game FOV.", null, new ConfigurationManagerAttributes { Order = 800 }));
 		CameraPullBack = config.Bind("09 - Field of View", "Camera pull-back (cm)", 0f, new ConfigDescription("Moves your view back from the gun at the hip so you see more of the gun and arms, like a camera offset. Works with or without Override game FOV. Aiming down sights is not affected: the sight picture stays exact. 0 = the game's position, 4 = a little more gun, 10 = a lot.", new AcceptableValueRange<float>(0f, 15f), new ConfigurationManagerAttributes { Order = 950 }));
 		AdsPullBack = config.Bind("09 - Field of View", "ADS pull-back (cm)", 0f, new ConfigDescription("The same as Camera pull-back, but while aiming down sights: your eye sits further back from the sight, so you see more of the gun around it. Only works with Enable dynamic FOV (15 - Combat Feedback) off. Iron sights, red dots and 1x optics only; it fades out through magnified scopes so their picture stays right. 0 = the game's position, 4 = a little more gun, 10 = a lot.", new AcceptableValueRange<float>(0f, 15f), new ConfigurationManagerAttributes { Order = 940 }));
+		const string LensSection = "12 - Camera Lens";
+		LensEnabled = config.Bind(LensSection, "Lens distortion", true, Toggle("Bodycam-style barrel/fisheye distortion on the view. Screen effect only: aim, deadzone and sights are unchanged."));
+		LensIntensity = config.Bind(LensSection, "Distortion intensity", 35f, D("Overall lens warp. Positive = fisheye barrel, negative = pincushion. Subtle bodycam is about 20-35.", -100f, 100f, false));
+		LensIntensityX = config.Bind(LensSection, "Distortion X multiplier", 1.21f, D("Horizontal distortion multiplier.", 0f, 2f, true));
+		LensIntensityY = config.Bind(LensSection, "Distortion Y multiplier", 1.11f, D("Vertical distortion multiplier.", 0f, 2f, true));
+		LensScale = config.Bind(LensSection, "Distortion scale", 1.000704f, D("Zoom to hide the edges the distortion pulls in. Above 1 zooms in.", 0.5f, 2f, true));
+		LensVignetteEnabled = config.Bind(LensSection, "Vignette", true, Toggle("Dark edges framing the view, like a lens."));
+		LensVignetteIntensity = config.Bind(LensSection, "Vignette intensity", 0.54f, D("How dark the screen edges get.", 0f, 1f, false));
+		LensVignetteSmoothness = config.Bind(LensSection, "Vignette smoothness", 0.1680282f, D("Edge falloff. Lower = harder edge, higher = soft gradient.", 0.01f, 1f, true));
+		LensVignetteRoundness = config.Bind(LensSection, "Vignette roundness", 0.83f, D("How circular the vignette is. 1 = circular lens, 0 = boxy.", 0f, 1f, true));
+		LensChromaticEnabled = config.Bind(LensSection, "Chromatic aberration", true, Toggle("Color fringing, strongest at the screen edges, like a cheap bodycam lens."));
+		LensChromaticIntensity = config.Bind(LensSection, "Chromatic aberration intensity", 0.15f, D("Fringe strength. Applied from the center out, so it gathers at the edges.", 0f, 1f, false));
+		LensBodycamFrame = config.Bind(LensSection, "Bodycam frame", true, Toggle("Always-on rounded dark frame around the screen edges for a bodycam look."));
+		LensBodycamFrameIntensity = config.Bind(LensSection, "Bodycam frame intensity", 0.601f, D("How dark the bodycam frame edges are.", 0.1f, 1f, false));
+		LensFaceCoverEnabled = config.Bind(LensSection, "Face cover overlay", false, Toggle("Shows a visor-style frame while wearing a full face cover (gas masks, full balaclavas). Half masks like bandanas are ignored."));
+		LensFaceCoverVisor = config.Bind(LensSection, "Overlay on helmet visors", false, Toggle("Also show the frame when a helmet face shield is flipped down, using the tighter goggle-style frame. Off = the game's own visor effect only."));
+		LensFaceCoverIntensity = config.Bind(LensSection, "Face cover intensity", 1f, D("Opacity of the face cover frame. Lower = fainter mask edges.", 0.1f, 1f, true));
+		LensFaceCoverTransition = config.Bind(LensSection, "Face cover transition speed", 2.2f, D("How fast the mask frame slides down when equipping and back up when removing. Higher = faster.", 0.5f, 6f, true));
 		CameraLagEnabled = config.Bind("08 - Camera Sway", "Enable camera lag", false, Toggle("The head/camera trails the weapon's sway instead of sitting rigidly on it."));
 		CameraSwayFollow = config.Bind("08 - Camera Sway", "Sway follow amount", 0.4037559f, D("Fraction of the weapon sway the camera drifts after.", 0f, 1f, true));
 		CameraSwayFollowSpeed = config.Bind("08 - Camera Sway", "Sway follow speed", 11.8f, D("How fast the camera catches up with the weapon sway. Lower lags further behind.", 0.5f, 20f, true));
@@ -341,16 +403,62 @@ internal static class HandlingConfig
 		AdrenalineHeartbeat = config.Bind("17 - Adrenaline", "Heartbeat volume", 0.5f, D("Volume of the synthesized heartbeat. Being shot at: soft, up to about 95 bpm. Hit: full volume, up to about 140 bpm, slowing and fading through the calm-down. 0 = off.", 0f, 1f, true));
 		AdrenalineDecay = config.Bind("17 - Adrenaline", "Decay time (s)", 8f, D("Seconds for adrenaline to fully drain after the last trigger.", 2f, 30f, true));
 		BreathingVolume = config.Bind("17 - Adrenaline", "Breathing volume", 0.45f, D("Volume of your own breathing. Silent when calm with full stamina. Sprinting: running breaths that get louder as stamina runs out. Stamina under 50% or getting hit: deep fast breathing, louder the emptier you are. Being shot at: light nose breathing. Recovering from 50% to 85%: quiet nose breathing that fades out. After a hit: heavy breathing settles into a nose-breathing calm-down. 0 = off.", 0f, 1f, false));
+		SprintBreathingVolume = config.Bind("17 - Adrenaline", "Sprint breathing volume (%)", 100f, D("Volume of the running breaths while sprinting, which get louder as stamina runs out. Scales on top of Breathing volume. 0 = off, 100 = full.", 0f, 100f, false));
+		ExhaustedBreathingVolume = config.Bind("17 - Adrenaline", "Exhausted breathing volume (%)", 100f, D("Volume of the deep, fast breathing once stamina drops under 50%, loudest when it is fully depleted. Scales on top of Breathing volume; heavy breathing after a hit keeps its own level. 0 = off, 100 = full.", 0f, 100f, false));
+		MaskMuffle = config.Bind("17 - Adrenaline", "Mask muffle (%)", 100f, D("While a gas mask or an armoured face cover is on (whenever the game muffles your voice), your breathing goes through the same mask sound as your voice, dulled as if behind the mask. 0 = off, breathing stays clear; 100 = full mask.", 0f, 100f, false));
 		CalmDownLength = config.Bind("17 - Adrenaline", "Calm-down length (s)", 20f, D("Length of the nose-breathing calm-down after a long, intense fight. A single hit gets a shorter tail (~11 s), and low stamina stretches it up to 50%.", 3f, 60f, false));
 		CalmDownVolume = config.Bind("17 - Adrenaline", "Calm-down nose volume", 0.6f, D("Nose breathing after adrenaline. After a hit, the heavy breathing hands over to nose breathing that slows and fades out, with a faint heartbeat slowing alongside it; another hit cuts straight back to heavy breathing. Being shot at brings a lighter version. This sets how loud it starts, scaled by how big the fight was and by Breathing volume. 0 = off: heavy breathing just fades and being shot at stays silent.", 0f, 1f, false));
 		JitterProbe = config.Bind("18 - Diagnostics", "Jitter probe (log)", false, Toggle("DIAGNOSTIC. Samples the gun and both palms at every stage of the frame (TrueView offsets, the game's animated pose, Tactical Stances, after the arms are IK-solved, and as rendered) and writes to the BepInEx log which stage makes them stutter. Summary every 2 s plus a line for each stutter frame. Leave off for normal play."));
 
 
-		if (typeof(ConfigFile).GetProperty("OrphanedEntries", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
-				?.GetValue(config) is System.Collections.IDictionary orphans && orphans.Count > 0)
+		if (stanceRecoilNew)
+			MigrateStance();
+
+		if (Orphans(config) is System.Collections.IDictionary orphans && orphans.Count > 0)
 		{
+			// Recoil settings moved into one section: carry over values tuned under the old names.
+			const string oldShot = "07 - Recoil & Shot Response";
+			Migrate(orphans, "02 - Body Camera", "Shot jolt", BodyCamShotJolt);
+			Migrate(orphans, oldShot, "Recoil intensity", HipSwayMultiplier);
+			Migrate(orphans, oldShot, "Hand kick", HandKick);
+			Migrate(orphans, oldShot, "Strength", ShotPush, 1f / 1.2f);
+			Migrate(orphans, oldShot, "Accuracy loss per shot", ShotBreathPenalty);
+			Migrate(orphans, oldShot, "Stamina recoil influence", StaminaShotInfluence);
+			Migrate(orphans, oldShot, "Disable TrueView recoil", DisableTrueViewRecoil);
 			orphans.Clear();
 			config.Save();
 		}
+	}
+
+	// Tactical Stances used to cut stance recoil itself (Active Aim Recoil and Canted Aim Recoil, both 0.75):
+	// the Active Aim value carries over once, when Game recoil, stance fire first appears.
+	private static void MigrateStance()
+	{
+		try
+		{
+			string path = System.IO.Path.Combine(BepInEx.Paths.ConfigPath, "com.devin.tacticalstances.cfg");
+			if (!System.IO.File.Exists(path))
+				return;
+			var ts = new ConfigFile(path, false);
+			if (Orphans(ts) is System.Collections.IDictionary orphans)
+				Migrate(orphans, "f - Stance Bonuses", "Active Aim Recoil", GameRecoilStance);
+		}
+		catch { }
+	}
+
+	// Entries in the file that nothing has bound (yet).
+	private static System.Collections.IDictionary Orphans(ConfigFile config) =>
+		typeof(ConfigFile).GetProperty("OrphanedEntries", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
+			?.GetValue(config) as System.Collections.IDictionary;
+
+	private static void Migrate(System.Collections.IDictionary orphans, string section, string key, ConfigEntryBase entry, float scale = 1f)
+	{
+		var old = new ConfigDefinition(section, key);
+		if (!(orphans[old] is string text))
+			return;
+		if (entry is ConfigEntry<float> f && float.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float v))
+			f.Value = v * scale;
+		else if (entry is ConfigEntry<bool> b && bool.TryParse(text, out bool on))
+			b.Value = on;
 	}
 }

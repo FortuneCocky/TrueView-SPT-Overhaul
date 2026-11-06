@@ -33,12 +33,11 @@ internal static partial class BloodTextures
             int oy = (BodyRows - 1 - c / BodyCols) * cell;
             int seed = c * 4231 + 17;
             var rng = new System.Random(seed);
-            var specks = new Vector3[10];
-            for (int i = 0; i < specks.Length; i++)
-            {
-                float ang = (float)rng.NextDouble() * 6.283f, dist = 0.62f + 0.3f * (float)rng.NextDouble();
-                specks[i] = new Vector3(Mathf.Cos(ang) * dist, Mathf.Sin(ang) * dist, 0.015f + 0.035f * Mathf.Pow((float)rng.NextDouble(), 2f));
-            }
+            // the lobes of torn flesh: angle, how far they flare, how wide they are
+            var lobes = new Vector3[6 + c % 3];
+            for (int i = 0; i < lobes.Length; i++)
+                lobes[i] = new Vector3((i + (float)rng.NextDouble() * 0.7f) * 6.283f / lobes.Length,
+                    0.1f + 0.3f * (float)rng.NextDouble(), 0.22f + 0.25f * (float)rng.NextDouble());
             var cracks = new Vector4[4 + c % 3];
             for (int i = 0; i < cracks.Length; i++)
                 cracks[i] = new Vector4((float)rng.NextDouble() * 6.283f, 0.45f + 0.35f * (float)rng.NextDouble(),
@@ -50,7 +49,7 @@ internal static partial class BloodTextures
             {
                 float u = (x + 0.5f) / cell * 2f - 1f, v = (y + 0.5f) / cell * 2f - 1f;
                 float g, a;
-                if (c < RunCell0) Wound(u, v, seed, specks, tongue, out g, out a);
+                if (c < RunCell0) Wound(u, v, seed, lobes, tongue, out g, out a);
                 else if (c < ArmorCell0) Run(u, v, seed, out g, out a);
                 else Armor(u, v, seed, cracks, phi, out g, out a);
                 // keep clear of the cell edge so mips don't bleed between cells
@@ -63,60 +62,67 @@ internal static partial class BloodTextures
         return Finish(w, h, px, "BloodFX_Body");
     }
 
-    /// <summary>Dark wet hole, ragged ring of torn flesh, short tongues of blood at the bottom, specks.</summary>
-    private static void Wound(float u, float v, int seed, Vector3[] specks, float tongue, out float g, out float a)
+    /// <summary>
+    /// A bullet wound as in the reference: a dark hole in a wide, lumpy burst of torn flesh that
+    /// flares out in irregular lobes (dark crevices between raised wet lumps), with a short tongue
+    /// at the bottom where the trickle starts. No stray specks: the mark is one solid mass.
+    /// </summary>
+    private static void Wound(float u, float v, int seed, Vector3[] lobes, float tongue, out float g, out float a)
     {
         float r = Mathf.Sqrt(u * u + v * v);
         float th = Mathf.Atan2(v, u);
         float cs = Mathf.Cos(th), sn = Mathf.Sin(th);
-        float hole = 0.26f * (1f + 0.3f * (Fbm(cs * 2f + 1f, sn * 2f + 1f, seed) - 0.5f));
-        float ring = 0.6f * (1f + 0.7f * (Fbm(cs * 1.5f + 5f, sn * 1.5f + 5f, seed + 1) - 0.5f));
-        // blood starting to run out of the bottom of the wound
+        float hole = 0.23f * (1f + 0.3f * (Fbm(cs * 2f + 1f, sn * 2f + 1f, seed) - 0.5f));
+        // the torn flesh flares out in lobes of different reach, like a burst flower
+        float ring = 0.5f + 0.12f * (Fbm(cs * 1.5f + 5f, sn * 1.5f + 5f, seed + 1) - 0.5f);
+        for (int i = 0; i < lobes.Length; i++)
+        {
+            float d = Mathf.DeltaAngle(th * Mathf.Rad2Deg, lobes[i].x * Mathf.Rad2Deg) * Mathf.Deg2Rad;
+            ring += lobes[i].y * Mathf.Exp(-d * d / (lobes[i].z * lobes[i].z));
+        }
+        // the tongue at the bottom where blood starts to run out
         float down = th + 1.5708f;
-        ring += 0.3f * Mathf.Exp(-(down - tongue) * (down - tongue) / 0.03f) + 0.18f * Mathf.Exp(-(down + 0.5f) * (down + 0.5f) / 0.015f);
-        float ragged = ring + 0.14f * (Fbm(u * 9f, v * 9f, seed + 2) - 0.5f);
-        a = Smooth(-0.03f, 0.03f, ragged - r);
+        ring += 0.2f * Mathf.Exp(-(down - tongue) * (down - tongue) / 0.05f);
+        float ragged = ring + 0.09f * (Fbm(u * 10f, v * 10f, seed + 2) - 0.5f);
+        a = Smooth(-0.025f, 0.025f, ragged - r);
         if (r < hole)
         {
-            // pooled blood in the hole: near black with a few wet glints in the lower half
-            float glint = Smooth(0.78f, 0.86f, Fbm(u * 22f, v * 22f, seed + 3)) * Smooth(0.05f, -0.15f, v);
-            g = 0.07f + 0.5f * glint;
+            // the hole: near black, a few wet glints low down
+            float glint = Smooth(0.8f, 0.88f, Fbm(u * 22f, v * 22f, seed + 3)) * Smooth(0.05f, -0.15f, v);
+            g = 0.05f + 0.45f * glint;
             a = 1f;
             return;
         }
-        float t = Mathf.Clamp01((r - hole) / Mathf.Max(0.05f, ring - hole));
-        float meat = 0.55f + 0.45f * Fbm(u * 7f, v * 7f, seed + 4);
-        // torn fibres radiating out of the hole, with a few wet glints on the raised rim
-        float fibre = Fbm(cs * 6f + r * 1.5f, sn * 6f, seed + 6);
-        meat *= 0.7f + 0.45f * fibre;
-        g = meat * (0.55f + 0.45f * Smooth(0f, 0.18f, t)) * (1f - 0.3f * Smooth(0.65f, 1f, t));
-        g += 0.35f * Smooth(0.8f, 0.88f, Fbm(u * 18f, v * 18f, seed + 7)) * (1f - Smooth(0.2f, 0.6f, t));
-        // drying specks around the wound
-        for (int i = 0; i < specks.Length; i++)
-        {
-            float dx = u - specks[i].x, dy = v - specks[i].y;
-            float d = specks[i].z - Mathf.Sqrt(dx * dx + dy * dy);
-            if (d > -0.01f)
-            {
-                float sa = Smooth(-0.01f, 0.01f, d);
-                if (sa > a) { a = sa; g = 0.8f; }
-            }
-        }
+        float t = Mathf.Clamp01((r - hole) / Mathf.Max(0.05f, ragged - hole));
+        // lumpy meat: raised wet lumps with dark crevices between them, fibres radiating from the hole
+        float lump = Fbm(u * 6.5f, v * 6.5f, seed + 4);
+        float crevice = Smooth(0.3f, 0.55f, Fbm(u * 11f, v * 11f, seed + 5));
+        float fibre = 0.75f + 0.4f * Fbm(cs * 7f + r * 2f, sn * 7f, seed + 6);
+        g = Mathf.Lerp(0.22f, 0.85f, Mathf.Pow(lump, 1.3f)) * fibre;
+        g = Mathf.Lerp(g * 0.45f, g, crevice);
+        // the rim right round the hole is the freshest, wettest flesh; the outer lobes darken and dry
+        g *= 0.7f + 0.5f * Smooth(0f, 0.2f, t) * (1f - Smooth(0.3f, 0.75f, t)) + 0.1f;
+        g *= 1f - 0.3f * Smooth(0.75f, 1f, t);
+        g += 0.3f * Smooth(0.82f, 0.9f, Fbm(u * 20f, v * 20f, seed + 7)) * (1f - Smooth(0.3f, 0.7f, t));
+        g = Mathf.Clamp01(g);
     }
 
-    /// <summary>A trickle running down from the wound, widest at the top, ending in a heavy bead.</summary>
+    /// <summary>The thick dark trickle that runs straight down from the wound and ends in a heavy bead.</summary>
     private static void Run(float u, float v, int seed, out float g, out float a)
     {
-        float path = 0.07f * Mathf.Sin(v * 3f + seed) + 0.04f * (Fbm(v * 2f, 1f, seed) - 0.5f);
+        float path = 0.04f * Mathf.Sin(v * 2.5f + seed) + 0.03f * (Fbm(v * 2f, 1f, seed) - 0.5f);
         float top = Smooth(-1f, 1f, v); // 0 at the bottom, 1 at the top
-        float w = (0.08f + 0.12f * top) * (0.6f + 0.8f * Fbm(v * 5f, 3f, seed + 1));
+        float w = (0.12f + 0.1f * top) * (0.8f + 0.4f * Fbm(v * 5f, 3f, seed + 1));
         float f = w - Mathf.Abs(u - path);
-        float bx = u - 0.07f * Mathf.Sin(-0.78f * 3f + seed), by = v + 0.78f;
-        f = Mathf.Max(f, 0.17f - Mathf.Sqrt(bx * bx * 1.2f + by * by * 0.8f));
+        float bx = u - 0.04f * Mathf.Sin(-0.78f * 2.5f + seed), by = v + 0.76f;
+        f = Mathf.Max(f, 0.2f - Mathf.Sqrt(bx * bx * 1.2f + by * by * 0.8f));
         if (v < -0.95f) f = -1f;
         a = Smooth(-0.02f, 0.02f, f);
-        float depth = Mathf.Clamp01(f / 0.12f);
-        g = Mathf.Lerp(0.95f, 0.55f, depth) * (0.85f + 0.15f * Fbm(u * 8f, v * 8f, seed + 2));
+        float depth = Mathf.Clamp01(f / 0.1f);
+        // dark glossy body with a lighter wet spine
+        g = Mathf.Lerp(0.75f, 0.3f, depth) * (0.85f + 0.15f * Fbm(u * 8f, v * 8f, seed + 2));
+        g += 0.25f * Smooth(0.75f, 0.85f, Fbm(u * 16f, v * 16f, seed + 3)) * depth;
+        g = Mathf.Clamp01(g);
     }
 
     /// <summary>Armor stopped it: black punch mark, a pale crescent of crushed coating, radial cracks, grainy dust halo.</summary>

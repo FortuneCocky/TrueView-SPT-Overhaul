@@ -56,6 +56,7 @@ internal static class BreathingSystem
         public float Volume;             // current, 0..1 before master and gain
         public float PitchBase = 1f;     // random per take
         public float Pitch = 1f;         // live multiplier (the calm-down slows the nose loop)
+        public float Scale = 1f;         // its own volume slider, on top of Breathing volume
     }
 
     private static readonly Layer Running = new() { File = "breath_running.wav", TrimStart = 0.5f, TrimEnd = 23.5f, Gain = 0.65f, FadeIn = 0.6f, FadeOut = 1.2f };
@@ -80,10 +81,13 @@ internal static class BreathingSystem
     private static readonly Shot HoldOut = new() { File = "breath_hold_out.wav", Gain = 0.5f };
     private static AudioSource _holdSource;
     private static bool _wasHolding;
-    private static float _holdSince;
+    private static float _holdSince, _holdVolume;
+    private static float _gate = 1f; // 0 while your voice or a hold-breath puff has the floor
 
     private static bool _loaded, _loadFailed, _warnedNoCamera;
     private static GameObject _root;
+    private static AudioLowPassFilter _maskFilter;
+    private static bool? _muffled;
     private static float _lastTick;
 
     private static float _phase;
@@ -128,6 +132,8 @@ internal static class BreathingSystem
     public static void Tick(Player player, float dt)
     {
         _lastTick = Time.unscaledTime;
+        AudioPriority.Tick(player, dt);
+        UpdateMask(player);
         bool on = HandlingConfig.Enabled?.Value == true;
         float master = on ? HandlingConfig.BreathingVolume?.Value ?? 0f : 0f;
 
@@ -228,11 +234,14 @@ internal static class BreathingSystem
         //   (deep fast) > adrenaline calm-down (nose) > recovering 50..85%
         //   (nose) > silent.
         // The others fade out, so a switch is a short crossfade, never two
-        // breathing tracks on top of each other; only the handover from heavy
-        // to the calm-down overlaps for a couple of seconds.
+        // breathing tracks on top of each other; at the handover from heavy
+        // to the calm-down the nose breathing waits for the heavy to fade.
+        // Above all of them: your own voice, then the hold-breath puffs
+        // (see AudioPriority).
         float runVol = Mathf.Max(0.2f + 0.8f * Mathf.SmoothStep(0f, 1f, (0.6f - stamina) / 0.55f), adr);
         float low = stamina < 0.5f ? Mathf.SmoothStep(0f, 1f, (0.5f - stamina) / 0.5f) : 0f;
-        float deepVol = Mathf.Max(low, Mathf.Max(adr, _kick));
+        // Exhausted breathing volume scales only the stamina part; adrenaline keeps its own level.
+        float deepVol = Mathf.Max(low * (HandlingConfig.ExhaustedBreathingVolume?.Value ?? 100f) / 100f, Mathf.Max(adr, _kick));
         float noseVol = 1f - Mathf.SmoothStep(0f, 1f, (stamina - 0.5f) / 0.35f);
         float calmVol = _calmVolume * Mathf.Pow(calm, 0.8f);
         // Shot at: light nose breathing, quieter than a hit's calm-down.
@@ -259,7 +268,8 @@ internal static class BreathingSystem
             _stateSince = Time.time;
         }
 
-        float run = _state == State.Run ? runVol : 0f;
+        Running.Scale = (HandlingConfig.SprintBreathingVolume?.Value ?? 100f) / 100f;
+        float run = _state == State.Run && Running.Scale > 0f ? runVol : 0f;
         float deep = _state == State.Deep ? deepVol : 0f;
         float nose = _state == State.Nose ? noseVol
             : _state == State.CalmNose ? Mathf.Max(Mathf.Max(calmVol, stressVol), recovering && stamina < 0.85f ? noseVol : 0f) : 0f;
@@ -277,9 +287,15 @@ internal static class BreathingSystem
 
         bool hold = HandlingState.IsHoldingBreath;
         HoldBreathSound(hold, master);
+        // Your voice first, then a hold-breath puff: the loops wait for both.
+        bool puff = _holdSource != null && _holdSource.isPlaying;
+        if (puff) _holdSource.volume = _holdVolume * AudioPriority.VoiceDuck;
+        float gate = AudioPriority.VoiceDuck * (puff ? 0f : 1f);
+        _gate = Mathf.MoveTowards(_gate, gate, dt / (gate < _gate ? 0.08f : 0.5f));
         Drive(Running, run, master, dt, hold);
         bool handover = _state == State.CalmNose;
         Drive(DeepFast, deep, master, dt, hold, handover);
+        if (handover && DeepFast.Volume > 0.05f) nose = 0f;
         Drive(Nose, nose, master, dt, hold, handover);
     }
 
@@ -326,7 +342,8 @@ internal static class BreathingSystem
         _holdSource.Stop();
         _holdSource.clip = shot.Clip;
         _holdSource.pitch = UnityEngine.Random.Range(0.97f, 1.03f);
-        _holdSource.volume = Mathf.Clamp01(master * shot.Gain * scale);
+        _holdVolume = Mathf.Clamp01(master * shot.Gain * scale);
+        _holdSource.volume = _holdVolume * AudioPriority.VoiceDuck;
         _holdSource.Play();
     }
 
@@ -361,7 +378,7 @@ internal static class BreathingSystem
             l.Source.time = UnityEngine.Random.Range(0f, l.Clip.length * 0.9f);
             l.PitchBase = UnityEngine.Random.Range(0.97f, 1.03f);
             l.Source.pitch = l.PitchBase * l.Pitch;
-            l.Source.volume = Mathf.Clamp01(master * l.Gain * l.Volume);
+            l.Source.volume = Mathf.Clamp01(master * l.Gain * l.Scale * l.Volume * _gate);
             l.Source.Play();
             if (l.Source.isPlaying)
             {
@@ -375,7 +392,7 @@ internal static class BreathingSystem
                 l.Clip = null;
             }
         }
-        l.Source.volume = Mathf.Clamp01(master * l.Gain * l.Volume);
+        l.Source.volume = Mathf.Clamp01(master * l.Gain * l.Scale * l.Volume * _gate);
         l.Source.pitch = l.PitchBase * l.Pitch;
     }
 
@@ -409,6 +426,7 @@ internal static class BreathingSystem
         _root = new GameObject("TrueView_Breathing");
         _root.transform.SetParent(cam.transform, false);
         _root.AddComponent<Watchdog>();
+        _muffled = null;
         foreach (var l in Layers)
         {
             var s = _root.AddComponent<AudioSource>();
@@ -431,15 +449,39 @@ internal static class BreathingSystem
     }
 
     /// <summary>
+    /// Under a gas mask or an armoured face cover (the game's Muffled) your voice goes
+    /// through the game's mask mixer; the breathing and hold-breath puffs join it, with
+    /// a low-pass for the mask in front of your mouth, so they sound like your voice does.
+    /// </summary>
+    private static void UpdateMask(Player player)
+    {
+        if (_root == null) return;
+        float amount = (HandlingConfig.MaskMuffle?.Value ?? 0f) / 100f;
+        bool muffled = amount > 0f && player != null && player.Muffled;
+        if (_maskFilter == null) _maskFilter = _root.AddComponent<AudioLowPassFilter>();
+        _maskFilter.enabled = muffled;
+        _maskFilter.cutoffFrequency = Mathf.Lerp(9000f, 1800f, amount);
+        // A touch of resonance at the cutoff: the boxy honk of a mask.
+        _maskFilter.lowpassResonanceQ = Mathf.Lerp(1f, 1.6f, amount);
+        if (muffled == _muffled) return;
+        _muffled = muffled;
+        foreach (var l in Layers)
+            if (l.Source != null) RouteToGameMixer(l.Source, muffled);
+        if (_holdSource != null) RouteToGameMixer(_holdSource, muffled);
+        Log.Info(muffled ? "Breathing: mask on, breathing muffled like your voice" : "Breathing: no mask, breathing clear");
+    }
+
+    /// <summary>
     /// EFT plays its sounds through its own audio mixer; a source left off it
     /// may not be heard. Use the group the game uses for ordinary sounds, so
     /// the game's volume setting applies too.
     /// </summary>
-    internal static void RouteToGameMixer(AudioSource s)
+    internal static void RouteToGameMixer(AudioSource s, bool mask = false)
     {
         try
         {
-            var group = Comfort.Common.Singleton<BetterAudio>.Instance?.VeryStandartMixerGroup;
+            BetterAudio audio = Comfort.Common.Singleton<BetterAudio>.Instance;
+            var group = (mask ? audio?.SelfSpeechReverb : null) ?? audio?.VeryStandartMixerGroup;
             if (group != null) s.outputAudioMixerGroup = group;
             else Log.Warning("Breathing: game audio mixer not found, playing unrouted");
         }
@@ -456,7 +498,7 @@ internal static class BreathingSystem
             {
                 if (l.Source == null || !l.Source.isPlaying) continue;
                 l.Volume = Mathf.MoveTowards(l.Volume, 0f, Time.unscaledDeltaTime / 0.5f);
-                l.Source.volume = Mathf.Clamp01((HandlingConfig.BreathingVolume?.Value ?? 0f) * l.Gain * l.Volume);
+                l.Source.volume = Mathf.Clamp01((HandlingConfig.BreathingVolume?.Value ?? 0f) * l.Gain * l.Scale * l.Volume);
                 if (l.Volume <= 0f) l.Source.Stop();
             }
         }
@@ -586,6 +628,8 @@ internal static class BreathingSystem
         Nose.Pitch = 1f;
         _state = _pending = State.None;
         _wasHolding = false;
+        _gate = 1f;
+        AudioPriority.Reset();
         Depth = 0f;
         StopAll();
     }

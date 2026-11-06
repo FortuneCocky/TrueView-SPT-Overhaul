@@ -7,7 +7,8 @@ namespace EuphoriaReaction;
 /// The reaction in phases: the animation has him (none) -> stumble -> fall, only if he can't hold it ->
 /// recover into a stance -> none. One value per bot, changed only through SetPhase, which logs every
 /// change. The stumble has a clock (Stumble length): steady after its min he recovers, still not steady
-/// at its max he's put down; the engine giving up on his balance sends him into the fall at any time.
+/// at its max he's eased back into his stance; only the engine giving up on his balance sends him into the
+/// fall, at any time.
 /// The rules themselves are in PhaseRules (tested without the game).
 /// </summary>
 internal partial class NmBody
@@ -43,7 +44,7 @@ internal partial class NmBody
         _stableFor = steady ? _stableFor + Time.deltaTime : 0f;
         bool held = _stableFor > Mathf.Min(RecoverHold, min);
         if (held && _aimBack) return; // steady and shooting back: he stays on his feet until that's over
-        bool fallen = nm_agent_has_fallen(_agent) == 1; // the engine gave up on his balance (after the catch-himself roll)
+        bool fallen = nm_agent_has_fallen(_agent) == 1; // the engine gave up on his balance (past OverTick's false-alarm net)
         switch (PhaseRules.StumbleDecision(elapsed, min, max, held, fallen && canFall))
         {
             case StumbleExit.Recover:
@@ -53,9 +54,9 @@ internal partial class NmBody
             case StumbleExit.Fall:
                 GoDown(h, "going over");
                 break;
-            case StumbleExit.ForcedFall:
-                if (!canFall) { EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} still stumbling at {max:F1} s - back to animation (falls off)"); ReleaseToStance(); break; }
-                GoDown(h, $"forced at max {max:F1} s");
+            case StumbleExit.TooLong:
+                EuphoriaPlugin.Log($"Delirium: {_p.ProfileId} still stumbling at {max:F1} s - eased back into his stance");
+                if (!canFall || !RecoverOnFeet(false, h)) ReleaseToStance();
                 break;
         }
     }

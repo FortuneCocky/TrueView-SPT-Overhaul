@@ -10,7 +10,7 @@ public enum StumbleLength { Short, Natural, Long, Custom }
 internal enum Phase { None, Stumble, Fall, Recover }
 
 /// <summary>What the stumble clock says this tick.</summary>
-internal enum StumbleExit { Stay, Recover, Fall, ForcedFall }
+internal enum StumbleExit { Stay, Recover, Fall, TooLong }
 
 /// <summary>
 /// The reaction's phase rules, kept free of Unity so they can be checked without the game
@@ -26,24 +26,26 @@ internal static class PhaseRules
     public const float StillEnergy = 8f;       // doll kinetic energy below which he counts as still
     private const float MinWindow = 0.2f;      // s a custom max stays above its min
 
-    /// The least and most time a stumble lasts.
+    /// The least and most time a stumble lasts. The max is a safety net, long enough for the physics to decide:
+    /// offline, a shot leg on Tough folds about 4.7 s after the hit.
     public static (float min, float max) StumbleWindow(StumbleLength len, float customMin, float customMax)
     {
         switch (len)
         {
-            case StumbleLength.Short: return (0.4f, 1.5f);
-            case StumbleLength.Long: return (1.5f, 5.0f);
+            case StumbleLength.Short: return (0.4f, 3.0f);
+            case StumbleLength.Long: return (1.5f, 8.0f);
             case StumbleLength.Custom: return (customMin, customMax < customMin + MinWindow ? customMin + MinWindow : customMax);
-            default: return (0.8f, 3.0f);
+            default: return (0.8f, 6.0f);
         }
     }
 
-    /// The stumble clock: going over always wins; steady past the min recovers; still wobbling at the max goes down.
+    /// The stumble clock: going over (the physics' call) always wins; steady past the min recovers; still on his
+    /// feet but wobbling at the max, he's eased back into his stance. The clock never puts him down.
     public static StumbleExit StumbleDecision(float elapsed, float min, float max, bool steady, bool goingDown)
     {
         if (goingDown) return StumbleExit.Fall;
         if (steady && elapsed >= min) return StumbleExit.Recover;
-        return elapsed >= max ? StumbleExit.ForcedFall : StumbleExit.Stay;
+        return elapsed >= max ? StumbleExit.TooLong : StumbleExit.Stay;
     }
 
     /// Is the fall over: down a moment and still, or down too long.

@@ -1,0 +1,29 @@
+; Euphoria Reaction toughness: Easy to drop
+; Natural (balance_natural.txt) with the odds moved: a looser upright pull and fewer catch steps.
+; Same stagger: measured offline about 5 steps and 1.3 m in the first second, and 47% of the 36 test
+; hits put him down (Natural 33%): now a hard chest or belly hit can too.
+
+NMShot_Standing * {
+  shotMaxSteps                    6       ; Natural 8
+  shotBodyStiffness               15.346
+  shotLooseness                   0.847
+  shotUprightStiffness            2.6     ; Natural 3.167
+  shotLeanAmount                  0.309
+  shockSpinMin                    10.212
+  shockSpinMax                    75.907
+  shotTimeBeforeCollapseWoundLeg  0.440
+}
+
+NMShot_IsMoving * {
+  balanceBodyStiffness            12.822
+  balanceMaxSteps                 3       ; Natural 4
+  balanceLeanAmount               0.050
+  balanceBodyDamping              1.370
+}
+
+; Shot on the run (read by the mod): offline about 90% down at 3.5 m/s and always at 5 m/s and over, after 3-5 steps.
+EuphoriaRun * {
+  runStaggerSpeed                 3.5
+  runUprightSlow                  4.2     ; Natural 4.6
+  runUprightFast                  3.5     ; Natural 3.7
+}
