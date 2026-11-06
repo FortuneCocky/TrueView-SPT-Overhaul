@@ -219,9 +219,6 @@ A deadlier, more anatomical damage model. It has a server part (body HP) and a c
 Every client setting can also be changed in game through the **BepInEx Configuration Manager (F12)**. HardcoreDMG's server settings are in `SPT_Runtime/user/mods/HardcoreDMG/config.jsonc` or its Config Editor.
 
 To leave a mod out, delete its folder in `BepInEx/plugins`. HardcoreDMG also has a server part in `SPT_Runtime/user/mods/HardcoreDMG`.
-
-If you use LensRL, remove `LensRL.dll`: TrueView has the lens built in now and keeps its own lens off while LensRL is installed.
-
 ## ✅ Compatibility
 
 - **SPT 4.1.x.** Everything is client only except HardcoreDMG, which also has a server mod.
