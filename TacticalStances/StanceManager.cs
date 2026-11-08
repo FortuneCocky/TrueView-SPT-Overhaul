@@ -66,6 +66,14 @@ public static class StanceManager
     // the smoothed offsets have already converged to the new stance.
     private static float _suppress;
 
+    // Tarkov's own left-shoulder mode, 0 = right shoulder, 1 = left, driven
+    // by the game's shoulder-swap animation curve so it blends through the
+    // swap. Stance offsets are authored for the right shoulder; on the left
+    // they are mirrored (X position, yaw and roll flip sign) instead of
+    // shoving the gun across the face and off screen.
+    private static float _leftShoulder;
+    private static bool _loggedBadPose;
+
     /// <summary>
     /// How far the live offsets sit from their targets — used to hold the
     /// first bullet until the weapon has actually raised to the fire pose.
@@ -233,8 +241,13 @@ public static class StanceManager
             return;
         }
 
+        _leftShoulder = LeftShoulderBlend(player);
+
+        // Already on the left shoulder (or swapping) — the lean swap would
+        // stack a second left move on top and push the gun off screen.
         bool leanSwapActive = TacticalStancesPlugin.EnableLeanShoulderSwap.Value &&
             !isBlockedState && (_pwa == null || !_pwa.IsAiming) &&
+            _leftShoulder < 0.01f &&
             player.MovementContext.Tilt < -0.1f;
         LeanSwapActive = leanSwapActive;
         _targetLeanSwapPos = leanSwapActive
@@ -389,8 +402,16 @@ public static class StanceManager
         float vis = 1f - _suppress;
         Vector3 totalPos = (_currentPosOffset + _currentLeanSwapPos) * vis;
         Vector3 totalRot = (_currentRotOffset + _currentLeanSwapRot) * vis;
+        if (_leftShoulder > 0f)
+        {
+            // Left shoulder: mirror the stance pose (X position, yaw, roll).
+            float m = 1f - 2f * _leftShoulder;
+            totalPos.x *= m;
+            totalRot.y *= m;
+            totalRot.z *= m;
+        }
         // Scope clearance is a fail-safe, not part of the stance — never
-        // faded by sprint suppression.
+        // faded by sprint suppression, and already in camera space.
         totalPos += ScopeClearance.LocalOffset(weaponRootAnim, _camTransform, _pwa != null && _pwa.IsAiming);
         bool hasOffset = totalPos != Vector3.zero || totalRot != Vector3.zero;
         bool usePivot = _gripLocalValid && !_sprinting;
@@ -434,6 +455,22 @@ public static class StanceManager
             Vector3 p = pos + rot * Vector3.Scale(S, pivot);
             pos = p + _bendLocal * (pos - p);
             rot = _bendLocal * rot;
+        }
+
+        // Last-resort guard: never write a broken or runaway pose (NaN, or
+        // the gun flung half a metre from where the game put it) — that is
+        // how a weapon "disappears". Fall back to the game's own pose.
+        if (!IsFinite(pos) || !IsFinite(rot) || (pos - _baseLocalPos).sqrMagnitude > 0.25f)
+        {
+            if (!_loggedBadPose)
+            {
+                _loggedBadPose = true;
+                TacticalStancesPlugin.Log.LogWarning(
+                    $"Discarded a broken weapon pose (offset {(pos - _baseLocalPos).magnitude:0.000} m, left shoulder {_leftShoulder:0.00}, " +
+                    $"lean swap {LeanSwapActive}, stance {_activeStance}) — using the game's pose.");
+            }
+            pos = _baseLocalPos;
+            rot = _baseLocalRot;
         }
 
         weaponRootAnim.localPosition = pos;
@@ -523,6 +560,30 @@ public static class StanceManager
         // next frame — once per frame, here in the visual pass only.
         bool suppressed = !TacticalStancesPlugin.EnableStances.Value || _sprinting || _suppress > 0.5f;
         ScopeClearance.Update(_pwa, suppressed, Time.deltaTime);
+    }
+
+    private static bool IsFinite(Vector3 v) =>
+        !(float.IsNaN(v.x) || float.IsNaN(v.y) || float.IsNaN(v.z) ||
+          float.IsInfinity(v.x) || float.IsInfinity(v.y) || float.IsInfinity(v.z));
+
+    private static bool IsFinite(Quaternion q) =>
+        !(float.IsNaN(q.x) || float.IsNaN(q.y) || float.IsNaN(q.z) || float.IsNaN(q.w) ||
+          float.IsInfinity(q.x) || float.IsInfinity(q.y) || float.IsInfinity(q.z) || float.IsInfinity(q.w));
+
+    private static float LeftShoulderBlend(Player player)
+    {
+        try
+        {
+            bool left = player.MovementContext?.LeftStanceController?.LeftStance ?? false;
+            float curve = player.GetCurveValue(PlayerAnimator.LEFT_STANCE_CURVE);
+            if (float.IsNaN(curve) || curve < -0.01f || curve > 1.01f)
+                return left ? 1f : 0f;   // curve not driven — fall back to the flag
+            return Mathf.Clamp01(curve);
+        }
+        catch
+        {
+            return 0f;
+        }
     }
 
     private static void SmoothVec(ref Vector3 current, ref Vector3 velocity, Vector3 target, float speed, float dt)
