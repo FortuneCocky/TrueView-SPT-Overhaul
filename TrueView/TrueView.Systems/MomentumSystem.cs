@@ -173,7 +173,7 @@ internal static class MomentumSystem
 		float yaw = player.Rotation.x * Mathf.Deg2Rad;
 		float sin = Mathf.Sin(yaw);
 		float cos = Mathf.Cos(yaw);
-		Vector3 worldVelocity = player.Velocity;
+		Vector3 worldVelocity = MotionTracker.Velocity;
 		Vector3 localVelocity = new(
 			worldVelocity.x * cos - worldVelocity.z * sin,
 			worldVelocity.y,

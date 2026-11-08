@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using EFT;
 using UnityEngine;
 
 namespace BloodFX;
@@ -49,6 +51,17 @@ public partial class BloodManager
                 s.LastT = now;
             }
 
+            if (L.OnBody)
+            {
+                // a heavy drop on the body clings and runs down it
+                if (L.Radius > 0.003f && now >= s.SplatAt)
+                {
+                    s.SplatAt = now + 0.12f;
+                    _runs.Begin(L.BodyCol, L.Pos, L.WallN, Mathf.Clamp(L.Radius * 1.8f, 0.006f, 0.012f), Random.Range(0.05f, 0.1f), L.Col, life, now,
+                        LiftOnMesh(L.BodyCol, L.Pos, L.WallN));
+                }
+                continue;
+            }
             if (L.OnWall)
             {
                 WallHit(L, ref s, now, life);
@@ -133,6 +146,253 @@ public partial class BloodManager
                 }
             }
             _puddles.Feed(s.Pool, s.PoolSerial, area, now);
+        }
+    }
+
+    // ---------------------------------------------------------------- ropes (the pouring kinds)
+
+    private BloodRopes _ropes;
+    private BodyRuns _runs;
+    private LandState[] _ropeLand = new LandState[0];
+    private int RopeCapacity() => Mathf.Max(8, _tier.Streams / 2);
+    private int RunCapacity() => _tier.Wounds * 4;
+
+    // the bleeding character's hit colliders, looked up once per character, so its own blood can run down it
+    private readonly Dictionary<int, Collider[]> _bodies = new Dictionary<int, Collider[]>();
+    private Collider[] _spurtBody;
+
+    private Collider[] BodyShape(Player victim)
+    {
+        if (victim == null) return null;
+        int id = victim.GetInstanceID();
+        if (_bodies.TryGetValue(id, out Collider[] list) && list.Length > 0 && list[0] != null) return list;
+        if (_bodies.Count > 128) _bodies.Clear();
+        BodyPartCollider[] parts = null;
+        try { parts = victim.PlayerBones != null ? victim.PlayerBones.BodyPartColliders : null; } catch { }
+        if (parts == null || parts.Length == 0) parts = victim.GetComponentsInChildren<BodyPartCollider>(true);
+        var cols = new List<Collider>(parts.Length);
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (parts[i] == null) continue;
+            Collider c = parts[i].GetComponent<Collider>();
+            if (c != null) cols.Add(c);
+        }
+        list = cols.ToArray();
+        _bodies[id] = list;
+        return list.Length > 0 ? list : null;
+    }
+
+    /// <summary>
+    /// A pour aimed along the bullet would start inside the body (the hit point is the entry hole and the bullet
+    /// goes on through). The blood comes out of the far side instead: the origin is marched through the body's
+    /// capsules to the exit; with no exit in reach (a shot along a limb) it pours out of the entry side.
+    /// </summary>
+    private void ExitWound(ref Vector3 origin, ref Vector3 vel)
+    {
+        if (_spurtBody == null) return;
+        float speed = vel.magnitude;
+        if (speed < 1e-4f) return;
+        Vector3 dir = vel / speed;
+        if (!BloodStreams.BodyContact(_spurtBody, origin + dir * 0.07f, 0.004f, out _, out _, out _)) return;
+        for (float t = 0.09f; t <= 0.6f; t += 0.02f)
+        {
+            Vector3 q = origin + dir * t;
+            if (BloodStreams.BodyContact(_spurtBody, q, 0.004f, out _, out _, out _)) continue;
+            origin = q + dir * 0.01f;
+            return;
+        }
+        if (BloodStreams.BodyContact(_spurtBody, origin, 0.06f, out _, out Vector3 n, out _))
+        {
+            Vector3 flat = n;
+            flat.y = 0f;
+            if (flat.sqrMagnitude < 1e-4f) flat = -dir;
+            flat.Normalize();
+            vel = (flat * 0.7f + Vector3.up * Mathf.Max(0f, dir.y) * 0.3f + Vector3.down * 0.2f).normalized * speed;
+            origin += flat * 0.01f;
+        }
+    }
+
+    // which character a hit collider belongs to, for mesh queries
+    private readonly Dictionary<int, Player> _owners = new Dictionary<int, Player>();
+
+    private Player PlayerOf(Collider col)
+    {
+        if (col == null) return null;
+        int id = col.GetInstanceID();
+        if (_owners.TryGetValue(id, out Player pl) && pl != null) return pl;
+        if (_owners.Count > 1024) _owners.Clear();
+        pl = col.GetComponentInParent<Player>();
+        _owners[id] = pl;
+        return pl;
+    }
+
+    /// <summary>How far above a point of a hit capsule the character's clothing really is, from its posed mesh (-1 = not now).</summary>
+    private float LiftOnMesh(Collider col, Vector3 p, Vector3 n)
+    {
+        return _marks.SurfaceOffset(PlayerOf(col), p, n, 0.14f, Time.time);
+    }
+
+    /// <summary>A drop that let go of a rope or a run: it falls as a blob and splashes where it lands.</summary>
+    private void CarryDrop(BloodStreams.Detach d, float now)
+    {
+        float fall = 1.2f;
+        if (Physics.Raycast(d.Pos, Vector3.down, out RaycastHit hit, 3f, _mask, QueryTriggerInteraction.Ignore))
+        {
+            float t = BloodStreams.LandTime(d.Pos, d.Vel, 9.81f, hit.point.y);
+            fall = t > 0f ? t : Mathf.Sqrt(2f * hit.distance / 9.81f);
+            Vector3 land = d.Pos + d.Vel * fall;
+            land.y = hit.point.y;
+            if (d.Vel.sqrMagnitude < 0.5f || Physics.Raycast(land + Vector3.up * 0.1f, Vector3.down, out hit, 0.3f, _mask, QueryTriggerInteraction.Ignore))
+                DripSplash(hit.point, hit.normal, d.Radius, d.Col, now + fall);
+        }
+        _blobParams.position = d.Pos;
+        _blobParams.velocity = d.Vel;
+        _blobParams.startLifetime = Mathf.Max(0.05f, fall);
+        _blobParams.startSize3D = new Vector3(d.Radius * 2f, d.Radius * 2.6f, d.Radius * 2f);
+        _blobParams.startColor = d.Col;
+        _blobs.Emit(_blobParams, 1);
+    }
+
+    /// <summary>Moves the ropes, carries on the beads that let go of them, and handles where their fluid arrives.</summary>
+    private void RopeTick(float now, Vector3 eye)
+    {
+        if (_runs.LiftAt == null) _runs.LiftAt = LiftOnMesh;
+        _ropes.Tick(now, eye);
+        // ropes torn off a wound that moved too fast: the rest of their flow goes on as drops
+        for (int i = 0; i < _ropes.HandoffCount; i++)
+        {
+            BloodStreams.Spec rest = _ropes.GetHandoff(i);
+            if (rest.Emit > 0.05f) _streams.Spawn(ref rest, now);
+        }
+        _ropes.ClearHandoff();
+        for (int i = 0; i < _ropes.DetachCount; i++) CarryDrop(_ropes.GetDetach(i), now);
+        _ropes.ClearDetach();
+        // blood running down bodies: moves with them, drips off where their surface turns under
+        _runs.Tick(now, Time.deltaTime, eye, eye != Vector3.zero);
+        for (int i = 0; i < _runs.DetachCount; i++) CarryDrop(_runs.GetDetach(i), now);
+        _runs.ClearDetach();
+
+        int n = _ropes.LandingCount;
+        if (n == 0) return;
+        if (_ropeLand.Length < _ropes.Capacity) _ropeLand = new LandState[_ropes.Capacity];
+        float life = _cfg.DecalLifetime.Value;
+        for (int i = 0; i < n; i++)
+        {
+            BloodStreams.Landing L = _ropes.GetLanding(i);
+            ref LandState s = ref _ropeLand[L.Slot];
+            if (s.Serial != L.Serial)
+            {
+                s = default;
+                s.Serial = L.Serial;
+                s.Pool = -1;
+                s.LastT = now;
+                s.SplatAt = now + 0.05f;
+                s.RayAt = 0f;
+            }
+            if (L.OnBody)
+            {
+                // the pour meets the body: it runs down it in a fresh run every so often, like liquid over a surface
+                if (now < s.SplatAt) continue;
+                s.SplatAt = now + Random.Range(0.25f, 0.45f);
+                Vector3 side = Vector3.Cross(L.WallN, Vector3.up).normalized * Random.Range(-0.6f, 0.6f) * L.Radius;
+                _runs.Begin(L.BodyCol, L.Pos + side, L.WallN, Mathf.Clamp(L.Radius * 1.2f, 0.008f, 0.016f), Random.Range(0.08f, 0.16f), L.Col, life, now,
+                    LiftOnMesh(L.BodyCol, L.Pos + side, L.WallN));
+                continue;
+            }
+            if (L.OnWall)
+            {
+                if (now < s.SplatAt) continue;
+                s.SplatAt = now + 0.12f;
+                WallHit(L, ref s, now, life);
+                continue;
+            }
+
+            // the real ground under the foot of the rope, refreshed as it moves
+            if (!s.HaveFloor || now >= s.RayAt || (L.Pos - s.Centroid).sqrMagnitude > 0.15f * 0.15f)
+            {
+                s.RayAt = now + 0.12f;
+                if (Physics.Raycast(L.Pos + Vector3.up * 0.3f, Vector3.down, out RaycastHit hit, 1.6f, _mask, QueryTriggerInteraction.Ignore))
+                {
+                    s.HaveFloor = true;
+                    s.FloorN = hit.normal;
+                    _ropes.SetFloor(L.Slot, L.Serial, hit.point.y);
+                }
+                else
+                {
+                    s.HaveFloor = false;
+                    _ropes.SetFloor(L.Slot, L.Serial, L.Pos.y - 1.5f);
+                    continue;
+                }
+            }
+            Vector3 fn = s.FloorN;
+            Vector3 ground = L.Pos;
+            float dt = Mathf.Clamp(now - s.LastT, 0f, 0.1f);
+            s.LastT = now;
+            if (!s.HaveCentroid) { s.Centroid = ground; s.HaveCentroid = true; }
+            else
+            {
+                Vector3 prev = s.Centroid;
+                s.Centroid = Vector3.Lerp(s.Centroid, ground, 0.3f);
+                if (dt > 0.005f)
+                {
+                    Vector3 flat = s.Centroid - prev;
+                    flat.y = 0f;
+                    s.Speed = Mathf.Lerp(s.Speed, flat.magnitude / dt, 0.3f);
+                }
+            }
+
+            // blood hitting the floor: the foot keeps splashing, a crown of satellites and a few beads thrown out
+            float r = Mathf.Clamp(L.Radius, 0.004f, 0.02f);
+            if (now >= s.SplatAt)
+            {
+                s.SplatAt = now + Random.Range(0.15f, 0.3f);
+                DripSplash(ground, fn, Mathf.Min(r * 0.8f, 0.012f), L.Col, now);
+                RopeSplash(ground, fn, L, r);
+            }
+
+            // a rope coming down on one spot builds a pool that spreads out from there; a rope whose wound is on
+            // the move (a body falling or being dragged) leaves its splashes along the way and pools where it rests
+            bool still = s.Speed < PoolSpeed && L.SourceSpeed < PoolSpeed;
+            if (!still) continue;
+            float flow = Mathf.PI * L.Radius * L.Radius * Mathf.Clamp(L.Vel.magnitude, 0.3f, 8f);
+            float area = flow * dt / 0.012f;
+            if (s.Pool < 0 || (ground - s.PoolPos).sqrMagnitude > PoolReach * PoolReach || !_puddles.IsLive(s.Pool, s.PoolSerial))
+            {
+                if (_puddles.FindNear(ground, PoolReach, out s.Pool, out s.PoolSerial))
+                    s.PoolPos = ground;
+                else
+                {
+                    s.Pool = _puddles.Add(ground, fn, Mathf.Clamp(r * 3f, 0.03f, 0.06f), Tint(PoolBase, L.Light, 1f), now, 0.6f,
+                        life * 1.5f, 1f, PoolMaxRadius, out s.PoolSerial);
+                    s.PoolPos = ground;
+                }
+            }
+            _puddles.Feed(s.Pool, s.PoolSerial, area, now);
+        }
+    }
+
+    /// <summary>Beads thrown out from where a rope hits the floor: blobs that fly a little way and stick where they come down.</summary>
+    private void RopeSplash(Vector3 ground, Vector3 n, BloodStreams.Landing L, float r)
+    {
+        int count = Mathf.Clamp(Mathf.RoundToInt((2f + r / 0.004f) * _load), 1, 5);
+        Vector3 t1 = Vector3.Cross(n, Mathf.Abs(n.y) < 0.9f ? Vector3.up : Vector3.right).normalized;
+        Vector3 t2 = Vector3.Cross(n, t1);
+        Vector3 slide = L.Vel - n * Vector3.Dot(L.Vel, n);
+        float scale = Mathf.Clamp(Mathf.Sqrt(_cfg.Intensity.Value), 0.5f, 1.6f);
+        Vector3 origin = ground + n * 0.01f;
+        for (int i = 0; i < count; i++)
+        {
+            float a = Random.value * 6.283f;
+            Vector3 radial = t1 * Mathf.Cos(a) + t2 * Mathf.Sin(a);
+            Vector3 v = radial * Random.Range(0.3f, 1.2f) + n * Random.Range(0.4f, 1.1f) + slide * 0.2f;
+            float land = BloodStreams.LandTime(origin, v, 9.81f, ground.y);
+            _blobParams.position = origin;
+            _blobParams.velocity = v;
+            _blobParams.startLifetime = Mathf.Clamp(land > 0f ? land + 0.1f : 0.5f, 0.1f, 1.2f);
+            float sz = Mathf.Lerp(0.004f, 0.011f, Mathf.Pow(Random.value, 2f)) * scale;
+            _blobParams.startSize3D = new Vector3(sz, sz * Random.Range(1f, 1.4f), sz);
+            _blobParams.startColor = L.Col;
+            _blobs.Emit(_blobParams, 1);
         }
     }
 

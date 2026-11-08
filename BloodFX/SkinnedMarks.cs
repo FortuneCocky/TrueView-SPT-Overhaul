@@ -61,6 +61,78 @@ internal sealed class SkinnedMarks
 
     public int Built, Skinned, Rigid, Missed;
 
+    // posed copies of a character's renderers, refreshed a few times a second, for surface queries
+    private sealed class BakeCache
+    {
+        public Vector3[] V = new Vector3[0];
+        public int[] T = new int[0];
+        public int Count;
+        public float At = -1f;
+    }
+    private readonly Dictionary<int, BakeCache> _bakes = new Dictionary<int, BakeCache>();
+    private float _nextSurface;
+
+    /// <summary>
+    /// How far out from a point on a hit capsule the character's visible surface really is, along
+    /// <paramref name="n"/> (clothing and gear sit outside the capsules). -1 when it can't be measured
+    /// right now (throttled, nothing baked, no mesh there).
+    /// </summary>
+    public float SurfaceOffset(Player victim, Vector3 p, Vector3 n, float maxDist, float now)
+    {
+        if (victim == null || now < _nextSurface) return -1f;
+        _nextSurface = now + 0.04f;
+        try
+        {
+            SkinnedMeshRenderer[] smrs = Renderers(victim);
+            Vector3 origin = p + n * maxDist;
+            Vector3 dir = -n;
+            var ray = new Ray(origin, dir);
+            float best = -1f;
+            float reach2 = (maxDist + 0.05f) * (maxDist + 0.05f);
+            for (int r = 0; r < smrs.Length; r++)
+            {
+                SkinnedMeshRenderer smr = smrs[r];
+                if (smr == null || !smr.enabled || !smr.gameObject.activeInHierarchy || smr.sharedMesh == null || !smr.isVisible) continue;
+                Bounds b = smr.bounds;
+                b.Expand(0.05f);
+                if (!b.IntersectRay(ray)) continue;
+                BakeCache c = Cached(smr, now);
+                if (c == null) continue;
+                int[] tri = c.T;
+                for (int t = 0; t + 2 < tri.Length; t += 3)
+                {
+                    Vector3 a = c.V[tri[t]], bb = c.V[tri[t + 1]], d = c.V[tri[t + 2]];
+                    if ((a - p).sqrMagnitude > reach2 && (bb - p).sqrMagnitude > reach2 && (d - p).sqrMagnitude > reach2) continue;
+                    if (RayTri(origin, dir, a, bb, d, out float tt) && tt <= maxDist + 0.01f && (best < 0f || tt < best)) best = tt;
+                }
+            }
+            if (best < 0f) return -1f;
+            return Mathf.Clamp(maxDist - best, 0.003f, maxDist);
+        }
+        catch { return -1f; }
+    }
+
+    private BakeCache Cached(SkinnedMeshRenderer smr, float now)
+    {
+        int id = smr.GetInstanceID();
+        if (!_bakes.TryGetValue(id, out BakeCache c))
+        {
+            if (_bakes.Count > 512) _bakes.Clear();
+            c = new BakeCache();
+            _bakes[id] = c;
+        }
+        if (c.Count > 0 && now - c.At < 0.33f) return c;
+        if (!Bake(smr)) return null;
+        if (c.V.Length < _bv.Count) c.V = new Vector3[_bv.Count];
+        _bv.CopyTo(c.V);
+        c.Count = _bv.Count;
+        if (c.T.Length == 0) c.T = _bake.triangles;
+        c.At = now;
+        return c;
+    }
+    /// <summary>True after a TryAdd that found no body surface anywhere near the hit (a graze past the visible mesh), so no floating mark should be placed either.</summary>
+    public bool LastMiss { get; private set; }
+
     public SkinnedMarks(Material mat, int capacity)
     {
         _mat = mat;
@@ -81,6 +153,7 @@ internal sealed class SkinnedMarks
     public bool TryAdd(Player victim, Transform bone, Vector3 pt, Vector3 dir, float size, int cell, Color32 col, float life,
         float runLen, float runWidth, int runCell, float now)
     {
+        LastMiss = false;
         try { return Build(victim, bone, pt, dir, size, cell, col, life, runLen, runWidth, runCell, now); }
         catch (System.Exception e)
         {
@@ -130,14 +203,48 @@ internal sealed class SkinnedMarks
             }
             if (hitHere) bestR = r;
         }
-        if (bestR < 0) { Missed++; return false; }
+        // a graze: the round clipped the hit capsule outside the visible mesh, so the bullet line meets no surface.
+        // The wound goes on the nearest bit of skin or clothing instead of hanging in the air beside the limb.
+        int grazeV = -1;
+        if (bestR < 0)
+        {
+            float bestD = 0.12f * 0.12f;
+            for (int r = 0; r < smrs.Length; r++)
+            {
+                SkinnedMeshRenderer smr = smrs[r];
+                if (smr == null || !smr.enabled || !smr.gameObject.activeInHierarchy || smr.sharedMesh == null || !smr.isVisible) continue;
+                Bounds b = smr.bounds;
+                b.Expand(0.12f);
+                if (!b.Contains(pt) || !Bake(smr)) continue;
+                for (int i = 0; i < _bv.Count; i++)
+                {
+                    float d = (_bv[i] - pt).sqrMagnitude;
+                    if (d < bestD) { bestD = d; grazeV = i; bestR = r; }
+                }
+            }
+            if (bestR < 0) { Missed++; LastMiss = true; return false; }
+        }
 
         SkinnedMeshRenderer src = smrs[bestR];
-        if (!Bake(src)) { Missed++; return false; }
-        Vector3 centre = origin + dir * bestT;
-        // winding of the front faces relative to the bullet, so only same-side triangles get the mark
-        facing = Vector3.Dot(bestN, dir) > 0f ? 1f : -1f;
-        if (facing > 0f) bestN = -bestN; // the mark faces back toward the shooter
+        if (!Bake(src)) { Missed++; LastMiss = true; return false; }
+        Vector3 centre;
+        if (grazeV >= 0)
+        {
+            centre = _bv[grazeV];
+            Vector3 nOut = grazeV < _bn.Count ? _bn[grazeV] : Vector3.zero;
+            if (nOut.sqrMagnitude < 1e-6f) nOut = pt - bone.position;
+            if (nOut.sqrMagnitude < 1e-6f) nOut = -dir;
+            bestN = nOut.normalized;
+            dir = -bestN;      // project straight onto the surface, keeping its outward-facing triangles
+            facing = -1f;
+        }
+        else
+        {
+            centre = origin + dir * bestT;
+            // winding of the front faces relative to the bullet, so only same-side triangles get the mark
+            facing = Vector3.Dot(bestN, dir) > 0f ? 1f : -1f;
+            if (facing > 0f) bestN = -bestN; // the mark faces back toward the shooter
+        }
         Mesh shared = src.sharedMesh;
         bool skinned = shared.isReadable && shared.vertexCount == _bv.Count && src.bones != null && src.bones.Length > 0;
 
@@ -174,7 +281,7 @@ internal sealed class SkinnedMarks
             float hl = runLen * 0.5f;
             Project(centre - up * (half * 0.3f + hl), bestN, facing, dir, right, up, runWidth * 0.5f, hl, BloodTextures.BodyCell(runCell), false);
         }
-        if (_oT.Count == 0) { Missed++; return false; }
+        if (_oT.Count == 0) { Missed++; LastMiss = true; return false; }
 
         // lift off the surface so it never z-fights
         for (int i = 0; i < _oV.Count; i++) _oV[i] += _oN[i] * Lift;

@@ -52,7 +52,7 @@ internal static class LocomotionGaitSystem
         _momentum = Mathf.Lerp(_momentum, targetMomentum, t);
         _currentGait = targetGait;
 
-        float speed = new Vector2(player.Velocity.x, player.Velocity.z).magnitude;
+        float speed = MotionTracker.GroundSpeed;
         // Footfalls drive the body camera (BodyCamSystem reads StepPhase).
         _phase += dt * _cadence * Mathf.PI * 2f * Mathf.Lerp(0.6f, 1.25f, Mathf.Clamp01(speed / 5f));
     }

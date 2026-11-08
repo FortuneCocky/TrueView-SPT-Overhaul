@@ -16,7 +16,7 @@ namespace EuphoriaReaction;
 /// the body settles and the animation takes back over.
 /// </summary>
 [BepInDependency(AmosBridge.Guid, BepInDependency.DependencyFlags.SoftDependency)] // loads after it, so its config and types are there in Awake
-[BepInPlugin("com.euphoria.reaction", "Euphoria Reaction", "2.2.0")]
+[BepInPlugin("com.euphoria.reaction", "Euphoria Reaction", "2.2.1")]
 public partial class EuphoriaPlugin : BaseUnityPlugin
 {
     public static EuphoriaPlugin Instance { get; private set; }
@@ -218,6 +218,7 @@ public partial class EuphoriaPlugin : BaseUnityPlugin
         catch (System.Exception e) { Logger.LogError($"getups.bin: {e.Message}"); }
         Logger.LogInfo("Delirium engine loaded — Euphoria reactions armed.");
         new HitReactionPatch().Enable();
+        try { new Patches.ShotPose().Enable(); new Patches.ShotPoseInFlight().Enable(); } catch (System.Exception e) { Logger.LogError($"shot pose: {e.Message}"); }
         try { AmosBridge.Init(AmosTurnOff); } catch (System.Exception e) { Logger.LogError($"Euphoria Style Physics bridge: {e.Message}"); }
         try { FireBlock.Install(); } catch (System.Exception e) { Logger.LogError($"fire block: {e.Message}"); }
         try { MedsGuard.Install(); } catch (System.Exception e) { Logger.LogError($"meds guard: {e.Message}"); }

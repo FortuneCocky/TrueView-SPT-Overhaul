@@ -111,6 +111,7 @@ Blood that is actual 3D geometry, not flat sprites. Every drop collides with the
 - **Head dismemberment.** A killing headshot can take off half the face or the whole head, leaving a ragged wound or neck stump that pumps and drips. Helmets, masks and glasses fly off as separate pieces. It's visual only: the real items stay on the body.
 - **Mist burst.** Every hit puffs a dense dark-red burst that tears into a web of fine strands and droplets within a fraction of a second.
 - **Spray.** Drops in realistic sizes (many tiny, a few heavy) that fall and splatter wherever they hit.
+- **Pours.** Bad wounds pour a thick, glossy stream out of the exit side, sized to match the body. If the bot whips around, the stream breaks into drops instead of stretching.
 
 **When it lands**
 - **Drops stick where they hit**, as small domed beads with tails pointing the way they flew.
@@ -129,6 +130,7 @@ Blood that is actual 3D geometry, not flat sprites. Every drop collides with the
 - **Bullet wounds** are real size: a dark hole in a wide, torn burst of flesh, with a thick trickle that runs down over a few seconds.
 - **Armor hits** leave a grey and black mark instead of blood: punch mark, cracks and grainy dust.
 - **Wrapped onto the character.** Wounds and armor marks are cut from the character's own model, so they wrap over plates, pouches, folds and skin and move with the body.
+- **Runs down the body.** Blood that reaches the bot's own body flows down over his clothes and skin and drips off where it can't go lower.
 
 **Performance and control**
 - **Quality tiers** (Low, Medium, High) and hard caps on everything.
@@ -172,6 +174,7 @@ Bots react to being shot with their whole body, driven by a real-time physics si
 
 **Fair and stable**
 - **Bots don't act while reacting.** No shooting (except an aim-back), moving, healing or AI until they've fully recovered.
+- **You hit what you see.** Your rounds are checked against the body as it's drawn, so a bot on the floor or getting up takes the hit where he lies.
 - **Fail-safes.** Any bot stuck, wedged or draped too long is put back into the nearest stance.
 - **Smooth at any frame rate.** The physics runs at 60 Hz and the body is interpolated between steps.
 - **Light on performance.** Every reacting bot's physics runs side by side on worker threads, and the map scan around a bot is cast in one batch.

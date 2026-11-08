@@ -393,7 +393,7 @@ internal static class BodyCamSystem
     private static void TickSteps(Player player, bool on, float dt)
     {
         MovementContext mc = player.MovementContext;
-        Vector3 vel = player.Velocity;
+        Vector3 vel = MotionTracker.Velocity;
         float speed = new Vector2(vel.x, vel.z).magnitude;
         float move = Mathf.Clamp01(speed / 0.8f);
         float pace = Mathf.Clamp01(speed / 4.5f);
@@ -527,6 +527,10 @@ internal static class BodyCamSystem
         if (_applied)
             Restore();
         if (_pos.sqrMagnitude < 1e-12f && _euler.sqrMagnitude < 1e-8f && _mount.sqrMagnitude < 1e-12f)
+            return;
+        // No player ticking us (hideout area view, menus, death cam): the
+        // main camera isn't the player's eyes, so leave it alone.
+        if (Time.frameCount - _lastTickFrame > 2)
             return;
         Camera cam = Camera.main;
         if (cam == null)

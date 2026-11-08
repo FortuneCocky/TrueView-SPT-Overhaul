@@ -33,7 +33,7 @@ public struct Tier
 /// predicted wall/floor splats, wound drips and death pools, all drawn from
 /// textures generated at load and one batched decal mesh.
 /// </summary>
-[BepInPlugin("com.irl.bloodfx", "BloodFX", "1.2.0")]
+[BepInPlugin("com.irl.bloodfx", "BloodFX", "1.2.1")]
 public class BloodFXPlugin : BaseUnityPlugin
 {
     public static BloodFXPlugin Instance { get; private set; }

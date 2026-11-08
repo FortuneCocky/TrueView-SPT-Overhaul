@@ -207,6 +207,12 @@ internal sealed class BodyDecals
                 for (int k = 0; k < Per; k++) _v[v + k] = Vector3.zero;
                 continue;
             }
+            if (!e.Bone.gameObject.activeInHierarchy)
+            {
+                // the body is despawned or parked: never draw its marks wherever its skeleton happens to sit
+                for (int k = 0; k < Per; k++) _v[v + k] = Vector3.zero;
+                continue;
+            }
             Vector3 p = e.Bone.TransformPoint(e.LPos);
             Vector3 toEye = eye - p;
             float dSq = toEye.sqrMagnitude;

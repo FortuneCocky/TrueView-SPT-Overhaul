@@ -339,6 +339,19 @@ internal static class ProceduralHipSystem
         _lastPosResult = weaponRoot.localPosition;
     }
 
+    /// <summary>
+    /// Takes the last written offset back off WeaponRoot, for frames where
+    /// TrueView stands aside (left shoulder). Without this the offset stays
+    /// baked in, and each shoulder swap added another one.
+    /// </summary>
+    public static void ClearWeaponPosOffset(Transform weaponRoot)
+    {
+        if (_appliedPosOffset != Vector3.zero && weaponRoot.localPosition == _lastPosResult)
+            weaponRoot.localPosition -= _appliedPosOffset;
+        _appliedPosOffset = Vector3.zero;
+        _lastPosResult = Vector3.zero;
+    }
+
     public static void Tick(Player player, float deltaTime)
     {
         if (deltaTime <= 0f || player == null)
@@ -1167,7 +1180,7 @@ internal static class ProceduralHipSystem
             float yaw = player.Rotation.x * Mathf.Deg2Rad;
             float sin = Mathf.Sin(yaw);
             float cos = Mathf.Cos(yaw);
-            float localRight = player.Velocity.x * cos - player.Velocity.z * sin;
+            float localRight = MotionTracker.Velocity.x * cos - MotionTracker.Velocity.z * sin;
             float lateralVel = Mathf.Clamp(localRight * 0.05f, -1.5f, 1.5f);
             // Combine input and velocity for a natural target
             float rollTarget = (strafeInput * 0.6f + lateralVel * 0.4f) * strafeStrength * 2.5f * weightRoll;
@@ -1356,8 +1369,9 @@ internal static class ProceduralHipSystem
         _lazyPitchVel = 0f;
         _cachedWeaponOffset = Quaternion.identity;
         _cachedWeaponPosOffset = Vector3.zero;
-        _appliedPosOffset = Vector3.zero;
-        _lastPosResult = Vector3.zero;
+        // _appliedPosOffset and _lastPosResult stay: they describe what is
+        // still on the WeaponRoot transform, and the next Apply or Clear has
+        // to take it off. Forgetting them here left the offset baked in.
         DebugOffset = Vector2.zero;
         DebugAngle = 0f;
         ControlOffset = Vector2.zero;

@@ -46,7 +46,7 @@ internal static class TurnInPlaceSystem
         MovementContext mc = player.MovementContext;
         EPlayerState state = mc.CurrentState.Name;
         bool prone = state == EPlayerState.ProneIdle || state == EPlayerState.ProneMove || state == EPlayerState.Transit2Prone;
-        float speed = new Vector2(player.Velocity.x, player.Velocity.z).magnitude;
+        float speed = MotionTracker.GroundSpeed;
         bool canTwist = !prone && !mc.IsInMountedState && speed < StationarySpeed &&
             !HandlingState.IsSprinting && !HandlingState.IsHoldingBreath;
 

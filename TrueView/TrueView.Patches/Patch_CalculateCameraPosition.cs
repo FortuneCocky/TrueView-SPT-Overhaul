@@ -79,6 +79,10 @@ internal class Patch_CalculateCameraPosition : ModulePatch
                 ProceduralHipSystem.ApplyWeaponPosOffset(__instance.HandsContainer.WeaponRoot);
                 JitterProbe.AfterTrueView();
             }
+            else
+            {
+                ProceduralHipSystem.ClearWeaponPosOffset(__instance.HandsContainer.WeaponRoot);
+            }
         }
     }
 }

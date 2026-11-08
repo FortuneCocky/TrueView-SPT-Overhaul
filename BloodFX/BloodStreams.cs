@@ -30,6 +30,8 @@ internal sealed class BloodStreams
         /// <summary>Side strand: a sideways acceleration (m/s^2) that pulls its drops off the main flow after DriftStart seconds of flight.</summary>
         public Vector3 Drift;
         public float DriftStart;
+        /// <summary>The bleeding character's own hit colliders: blood that meets them clings and runs instead of flying through.</summary>
+        public Collider[] Body;
     }
 
     /// <summary>A drop that let go of a drip, to be carried on as a blob.</summary>
@@ -49,6 +51,9 @@ internal sealed class BloodStreams
         /// <summary>How fast the wound itself was moving when this drop left it (anchored streams only).</summary>
         public float SourceSpeed;
         public bool OnWall, Anchored;
+        /// <summary>Set when the fluid met the character's own body: the collider it is on (WallN is the surface normal there).</summary>
+        public bool OnBody;
+        public Collider BodyCol;
         public Color Col;
     }
 
@@ -293,7 +298,16 @@ internal sealed class BloodStreams
                 d.P += d.V * dt;
 
                 bool gone = false;
-                if (sp.HasWall)
+                if (sp.Body != null && a > 0.03f && (d.P - sp.Origin).sqrMagnitude > 0.0036f)
+                {
+                    // the character's own body in the way: the drop clings to it and runs
+                    if (BodyContact(sp.Body, d.P, d.R, out Vector3 bp, out Vector3 bn, out Collider bc))
+                    {
+                        ReportBody(i, ref st, bp, d.V, d.R, bn, bc);
+                        gone = true;
+                    }
+                }
+                if (!gone && sp.HasWall)
                 {
                     // the wall is a plane found by one raycast; only drops arriving near where it was hit count as on it
                     float dist = Vector3.Dot(d.P - sp.WallP, sp.WallN);
@@ -361,6 +375,50 @@ internal sealed class BloodStreams
         }
         _wasDrawing = true;
         if (_live == 0) _renderer.enabled = false;
+    }
+
+    /// <summary>Is the point within <paramref name="r"/> of one of the body's hit colliders? Gives the surface point and normal there.</summary>
+    public static bool BodyContact(Collider[] body, Vector3 p, float r, out Vector3 point, out Vector3 normal, out Collider col)
+    {
+        point = p;
+        normal = Vector3.up;
+        col = null;
+        for (int i = 0; i < body.Length; i++)
+        {
+            Collider c = body[i];
+            if (c == null || !c.enabled) continue;
+            Bounds b = c.bounds;
+            b.Expand(r * 2f);
+            if (!b.Contains(p)) continue;
+            Vector3 q = c.ClosestPoint(p);
+            Vector3 d = p - q;
+            float dd = d.sqrMagnitude;
+            if (dd > r * r) continue;
+            col = c;
+            point = q;
+            if (dd > 1e-8f) normal = d / Mathf.Sqrt(dd);
+            else
+            {
+                // inside the capsule: out from its axis
+                Vector3 o = p - c.bounds.center;
+                o.y *= 0.2f;
+                normal = o.sqrMagnitude > 1e-8f ? o.normalized : Vector3.up;
+                point = p;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private void ReportBody(int slot, ref Stream st, Vector3 pos, Vector3 vel, float r, Vector3 normal, Collider col)
+    {
+        if (LandingCount >= _landing.Length) return;
+        ref Spec sp = ref st.S;
+        _landing[LandingCount++] = new Landing
+        {
+            Slot = slot, Serial = st.Serial, Pos = pos, Vel = vel, Radius = r, OnBody = true, BodyCol = col, WallN = normal,
+            Light = sp.Light, Col = sp.Col, Anchored = sp.Anchor != null, SourceSpeed = st.SourceSpeed
+        };
     }
 
     private void Report(int slot, ref Stream st, Vector3 pos, Vector3 vel, float r, bool wall)

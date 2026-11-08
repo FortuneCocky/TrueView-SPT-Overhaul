@@ -127,6 +127,8 @@ public partial class BloodManager : MonoBehaviour
         _prints = new Footprints(transform, liquidMat, PrintCapacity());
         StepSplash.Load(this);
         _streams = new BloodStreams(transform, liquidMat, _tier.Streams, _tier.Rings);
+        _ropes = new BloodRopes(transform, liquidMat, RopeCapacity(), _tier.Rings);
+        _runs = new BodyRuns(transform, liquidMat, RunCapacity());
         _brains = new BrainChunks(transform, liquidMat, BrainCapacity(), _mask);
         _brains.Landed = OnChunkLanded;
         _heads = new HeadGib(transform, liquidMat, _mask);
@@ -347,6 +349,9 @@ public partial class BloodManager : MonoBehaviour
         if (_brains.Capacity != Mathf.Clamp(BrainCapacity(), 16, 512)) _brains.Resize(BrainCapacity());
         if (_streams.Capacity != Mathf.Clamp(_tier.Streams, 4, 512) || _streams.Rings != _tier.Rings)
             _streams.Resize(_tier.Streams, _tier.Rings);
+        if (_ropes.Capacity != Mathf.Clamp(RopeCapacity(), 4, 256) || _ropes.Rings != Mathf.Clamp(_tier.Rings, 8, 32))
+            _ropes.Resize(RopeCapacity(), _tier.Rings);
+        if (_runs.Capacity != Mathf.Clamp(RunCapacity(), 8, 256)) _runs.Resize(RunCapacity());
     }
 
     private void ClearAll()
@@ -370,6 +375,8 @@ public partial class BloodManager : MonoBehaviour
         _heads.Clear();
         for (int i = 0; i < PendingDropSlots; i++) _pendingDrops[i].Active = false;
         _streams.Clear();
+        _ropes.Clear();
+        _runs.Clear();
         for (int i = 0; i < PendingSlots; i++) _pending[i].Active = false;
         for (int i = 0; i < WoundSlots; i++) _dripEnd[i] = 0f;
         _streams.ClearDetach();
@@ -509,7 +516,8 @@ public partial class BloodManager : MonoBehaviour
             int woundCell = BloodTextures.WoundCell0 + Random.Range(0, BloodTextures.WoundCells);
             int runCell = BloodTextures.RunCell0 + Random.Range(0, BloodTextures.RunCells);
             if (!(_cfg.ConformMarks.Value && _marks.TryAdd(victim, di.HitCollider.transform, pt, dir, size, woundCell,
-                    Tint(WoundBase, light, 1f), _cfg.DecalLifetime.Value * 2f, run ? runLen : 0f, size * 0.3f, runCell, now)))
+                    Tint(WoundBase, light, 1f), _cfg.DecalLifetime.Value * 2f, run ? runLen : 0f, size * 0.3f, runCell, now)) && !_marks.LastMiss)
+                // (a hit with no body surface anywhere near it gets no floating mark: it would hang in the air beside the limb)
                 _body.Add(di.HitCollider.transform, pt + face * _cfg.BodyDecalOffset.Value, face, size, woundCell, BodyDecals.ProfileWound,
                     0.035f, Tint(WoundBase, light, 1f), _cfg.DecalLifetime.Value * 2f, run, runLen, Random.Range(2.5f, 3.5f), runCell, now);
         }
@@ -525,6 +533,7 @@ public partial class BloodManager : MonoBehaviour
         float power, float scale, float floorY, Vector3 floorN, float light, Color32 decalCol, float now)
     {
         Transform anchor = di.HitCollider != null ? di.HitCollider.transform : null;
+        _spurtBody = BodyShape(victim);
         if (blast)
         {
             Spawn(Spurt.HeadBurst, pt, Vector3.up, power, scale, floorY, floorN, light, decalCol, now, null);
@@ -590,7 +599,7 @@ public partial class BloodManager : MonoBehaviour
                 // pumping jet: pressure pulses at heart rate, slowly dropping
                 Vector3 d = (Jitter(dir, 0.5f) + Vector3.up * 0.45f).normalized;
                 Stream(pt, d * Random.Range(2.2f, 3.2f), Random.Range(1.3f, 2.2f), 1.6f,
-                    Random.Range(0.013f, 0.022f) * scale, 0.55f, Random.Range(1.4f, 2f), 0.5f, 0.8f, 1f, floorY, floorN, light, decalCol, now, anchor, true);
+                    Random.Range(0.006f, 0.01f) * scale, 0.55f, Random.Range(1.4f, 2f), 0.5f, 0.8f, 1f, floorY, floorN, light, decalCol, now, anchor, true);
                 break;
             }
             case Spurt.Gush:
@@ -599,7 +608,7 @@ public partial class BloodManager : MonoBehaviour
                 d.y = 0f;
                 d = (d.normalized * 0.6f + Vector3.down * 0.4f + Random.insideUnitSphere * 0.2f).normalized;
                 Stream(pt, d * Random.Range(0.6f, 1.3f), Random.Range(0.8f, 1.4f), 1.8f,
-                    Random.Range(0.026f, 0.042f) * scale, 0.6f, 0f, 0f, 0.6f, 1f, floorY, floorN, light, decalCol, now, anchor, true);
+                    Random.Range(0.011f, 0.017f) * scale, 0.6f, 0f, 0f, 0.6f, 1f, floorY, floorN, light, decalCol, now, anchor, true);
                 break;
             }
             case Spurt.HeadBurst:
@@ -666,12 +675,12 @@ public partial class BloodManager : MonoBehaviour
                 d.y = 0f;
                 d = (d.normalized * 0.75f + Vector3.up * 0.1f + Random.insideUnitSphere * 0.15f).normalized;
                 Stream(pt, d * Random.Range(0.7f, 1.4f), Random.Range(1.2f, 2.4f), 2f,
-                    Random.Range(0.013f, 0.02f) * scale, 0.65f, Random.Range(1.1f, 1.6f), 0.22f, 0.35f, 1f, floorY, floorN, light, decalCol, now, anchor, true);
+                    Random.Range(0.008f, 0.012f) * scale, 0.65f, Random.Range(1.1f, 1.6f), 0.22f, 0.35f, 1f, floorY, floorN, light, decalCol, now, anchor, true);
                 break;
             }
             case Spurt.Dribble:
                 Stream(pt, (dir * 0.3f + Vector3.down * 0.2f) * Random.Range(0.5f, 1f), Random.Range(1f, 1.8f), 1.8f,
-                    Random.Range(0.006f, 0.01f) * scale, 0.3f, 0f, 0f, 0.5f, 1f, floorY, floorN, light, decalCol, now, anchor, true);
+                    Random.Range(0.004f, 0.006f) * scale, 0.3f, 0f, 0f, 0.5f, 1f, floorY, floorN, light, decalCol, now, anchor, true);
                 break;
         }
     }
@@ -679,11 +688,12 @@ public partial class BloodManager : MonoBehaviour
     private void Stream(Vector3 origin, Vector3 vel, float emit, float life, float radius, float decay, float pulseF, float pulseD,
         float breakup, float gravity, float floorY, Vector3 floorN, float light, Color32 decalCol, float now, Transform anchor, bool splat)
     {
+        if (anchor != null) ExitWound(ref origin, ref vel);   // a pour leaves the far side of the body, not the entry hole
         var s = new BloodStreams.Spec
         {
             Origin = origin, Velocity = vel, Emit = emit, Life = life, Radius = radius, Decay = decay,
             PulseFreq = pulseF, PulseDepth = pulseD, Breakup = breakup, Gravity = gravity, FloorY = floorY,
-            Light = light, Col = Tint(StreamBase, light, 1f), Anchor = anchor,
+            Light = light, Col = Tint(StreamBase, light, 1f), Anchor = anchor, Body = anchor != null ? _spurtBody : null,
             AnchorLocal = anchor != null ? anchor.InverseTransformPoint(origin) : Vector3.zero
         };
         float speed = vel.magnitude;
@@ -696,11 +706,13 @@ public partial class BloodManager : MonoBehaviour
             float sz = Mathf.Clamp(radius * 14f * (1f + emit), 0.12f, 0.7f);
             QueueImpact(wall.point, wall.normal, vel / speed, now + wall.distance / speed, sz, 0.5f, floorY, light, decalCol);
         }
-        // where it lands on the floor is found live each frame (LandingTick): pool, streak or wall run
-        _streams.Spawn(ref s, now);
+        // where it lands is found live each frame (LandingTick / RopeTick): pool, splash or wall run.
+        // Blood pouring from a wound (anchored to it) is a thick rope; jets and bursts are showers of drops.
+        bool rope = anchor != null;
+        if (rope) _ropes.Spawn(ref s, now); else _streams.Spawn(ref s, now);
 
-        // side strands: they share the rope's root, then peel off sideways a little way along and bead up sooner
-        if (radius < 0.012f || emit < 0.15f || _load < 0.7f) return;
+        // side strands: they share the root, then peel off sideways a little way along and bead up sooner
+        if (radius < (rope ? 0.007f : 0.012f) || emit < 0.15f || _load < 0.7f) return;
         int strands = Random.Range(1, 3);
         Vector3 across = Vector3.Cross(vel, Vector3.up);
         if (across.sqrMagnitude < 1e-4f) across = Vector3.right;
@@ -709,12 +721,12 @@ public partial class BloodManager : MonoBehaviour
         {
             BloodStreams.Spec t = s;
             t.Velocity = vel * Random.Range(0.92f, 1.05f);
-            t.Radius = radius * Random.Range(0.3f, 0.5f);
+            t.Radius = radius * (rope ? Random.Range(0.45f, 0.65f) : Random.Range(0.3f, 0.5f));
             t.Emit = emit * Random.Range(0.5f, 0.9f);
             t.Breakup = breakup * 1.4f + 0.5f;
             t.Drift = (across * (Random.value < 0.5f ? -1f : 1f) + Vector3.up * Random.Range(-0.3f, 0.3f)) * Random.Range(0.8f, 2.2f) * Mathf.Max(0.5f, speed);
             t.DriftStart = Random.Range(0.06f, 0.2f);
-            _streams.Spawn(ref t, now);
+            if (rope) _ropes.Spawn(ref t, now); else _streams.Spawn(ref t, now);
         }
     }
 
@@ -921,6 +933,7 @@ public partial class BloodManager : MonoBehaviour
         bool ok;
         Vector3 cut, up;
         Transform neck;
+        _spurtBody = BodyShape(victim);
         // the face wound (one side of the face torn out, the rest of the head kept) is shelved: every head goes whole for now
         bool half = false;
         try { ok = _heads.Dismember(victim, dir, ref half, light, _cfg.DecalLifetime.Value, now, out cut, out up, out neck); }
@@ -1348,7 +1361,7 @@ public partial class BloodManager : MonoBehaviour
             {
                 _lastSeen = _seen;
                 BloodFXPlugin.Log.LogInfo($"BloodFX: hits seen {_seen}, spawned {_spawned}; skipped player {_skipPlayer}, armor/zero {_skipArmor}, " +
-                    $"type {_skipType}, far {_skipFar}, budget {_skipBudget}; conforming marks {_marks.Built} (skinned {_marks.Skinned}, rigid {_marks.Rigid}, missed {_marks.Missed}); live streams {_streams.LiveCount}, blobs {_blobs.particleCount}, " +
+                    $"type {_skipType}, far {_skipFar}, budget {_skipBudget}; conforming marks {_marks.Built} (skinned {_marks.Skinned}, rigid {_marks.Rigid}, missed {_marks.Missed}); live streams {_streams.LiveCount} (ropes {_ropes.LiveCount}), blobs {_blobs.particleCount}, " +
                     $"decals {_decals.LiveCount}, body marks {_body.LiveCount}, stuck drops {_stuck.LiveCount}, pools {_puddles.LiveCount}, " +
                     $"splats {_splats.LiveCount}, trails {_trails.LiveCount}, drag smears {_smears.LiveCount}, footprints {_prints.LiveCount} ({_printsMade} made), brain chunks {_brains.LiveCount}, " +
                     $"load {_load:F2}, heads off {_decapitations} (face wounds {_faceWounds}; on bodies {_heads.CutCount}, shards {_heads.ShardCount})");
@@ -1415,6 +1428,7 @@ public partial class BloodManager : MonoBehaviour
 
         _streams.Tick(now, haveEye ? eye : Vector3.zero);
         LandingTick(now);
+        RopeTick(now, haveEye ? eye : Vector3.zero);
         _brains.Tick(now, Time.deltaTime, haveEye ? eye : Vector3.zero);
         _heads.Tick(now, Time.deltaTime);
         for (int i = 0; i < _streams.DetachCount; i++)
@@ -1464,19 +1478,23 @@ public partial class BloodManager : MonoBehaviour
     {
         GameWorld world = Singleton<GameWorld>.Instance;
         Player me = world != null ? world.MainPlayer : null;
-        Transform cam = me != null ? me.CameraPosition : null;
-        if (cam == null)
+        Transform head = me != null ? me.CameraPosition : null;
+        Camera c = Camera.main;
+        Transform cam = c != null ? c.transform : null;
+        // a camera that has left the player's head (free cam, spectating) is where you are looking from
+        if (cam != null && (head == null || (cam.position - head.position).sqrMagnitude > 1.5f * 1.5f))
         {
-            Camera c = Camera.main;
-            cam = c != null ? c.transform : null;
+            eye = cam.position;
+            look = cam.forward;
+            return true;
         }
-        if (cam == null)
+        if (head == null)
         {
             eye = look = Vector3.zero;
             return false;
         }
-        eye = cam.position;
-        look = me != null ? me.LookDirection : cam.forward;
+        eye = head.position;
+        look = me.LookDirection;
         return true;
     }
 

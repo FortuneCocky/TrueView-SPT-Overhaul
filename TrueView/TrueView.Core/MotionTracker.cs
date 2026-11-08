@@ -47,6 +47,21 @@ internal static class MotionTracker
 
 	public static float Lean { get; private set; }
 
+	// Under this the player is standing: lean and capsule settling stay below it.
+	private const float StandingSpeed = 0.15f;
+
+	// Velocity measured from where the player actually went. The game's
+	// Velocity is the character controller's last move: it can hold a stale
+	// value after spawning and flickers while leaning, and read as footsteps
+	// (body cam bob, gait, momentum) while standing still.
+	private static Vector3 _velocity;
+	private static float _lastMismatchLog = -999f;
+	private static int _mismatchLogs;
+
+	public static Vector3 Velocity => _velocity;
+
+	public static float GroundSpeed => new Vector2(_velocity.x, _velocity.z).magnitude;
+
 	public static void Update(Player player, float deltaTime)
 	{
 		// Smoothing integrates with a capped dt so hitches don't overshoot,
@@ -68,7 +83,15 @@ internal static class MotionTracker
 			_hasSample = true;
 			return;
 		}
-		IsMoving = InputDirection.sqrMagnitude > 0.0001f || NormalizedSpeed > 0.05f;
+		Vector3 moved = (position - _lastPosition) / rateDt;
+		// Spawn, teleport or a hitch: not a walking speed.
+		if (moved.sqrMagnitude > 15f * 15f)
+			moved = Vector3.zero;
+		_velocity = Vector3.Lerp(_velocity, moved, 1f - Mathf.Exp(-20f * deltaTime));
+		// CharacterMovementSpeed is the walk speed setting (mouse wheel), not
+		// how fast you go, so it can't tell standing from walking.
+		IsMoving = GroundSpeed > StandingSpeed;
+		LogVelocityMismatch(player);
 		_lastPosition = position;
 		float num = Mathf.DeltaAngle(_lastRotation.x, rotation.x) - _selfRotation.x;
 		float num2 = rotation.y - _lastRotation.y - _selfRotation.y;
@@ -95,9 +118,24 @@ internal static class MotionTracker
 		_yawRateSlow = Smooth(_yawRateSlow, target, deltaTime, 5f);
 	}
 
+	private static void LogVelocityMismatch(Player player)
+	{
+		if (IsMoving || _mismatchLogs >= 5 || Time.unscaledTime - _lastMismatchLog < 10f)
+			return;
+		Vector3 game = player.Velocity;
+		float gameSpeed = new Vector2(game.x, game.z).magnitude;
+		if (gameSpeed < 0.3f)
+			return;
+		_lastMismatchLog = Time.unscaledTime;
+		_mismatchLogs++;
+		Utilities.Log.Info($"Motion: the game reports {gameSpeed:F2} m/s while you stand still (lean {Lean:F2}), TrueView uses the measured {GroundSpeed:F2} m/s");
+	}
+
 	public static void Reset(Player player)
 	{
 		_hasSample = false;
+		_velocity = Vector3.zero;
+		_mismatchLogs = 0;
 		_yawRate = 0f;
 		_pitchRate = 0f;
 		_yawRateSlow = 0f;

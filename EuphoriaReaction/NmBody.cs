@@ -1479,6 +1479,7 @@ internal partial class NmBody : MonoBehaviour
             }
         }
         if (_twins.Count > 0) SyncTwins();
+        ShotPoseCapture(); // the pose he is drawn in, for your shots (NmBodyShotPose)
         if (_gun == null || _gunDropped || _bones[20] == null) return;
         if (_gunLocked) ApplyGunLock();
         else _gun.SetPositionAndRotation(_bones[20].position - _gunHeldRot * _gripLocal, _gunHeldRot);

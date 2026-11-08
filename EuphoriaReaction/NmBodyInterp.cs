@@ -72,7 +72,7 @@ internal partial class NmBody
     {
         long pf = PerfNow();
         ViewOn();
-        try { LateUpdateCore(); PoseSnapshot(); }
+        try { LateUpdateCore(); PoseSnapshot(); ShotPoseCapture(); }
         finally { _view = false; PerfFrame(pf); }
     }
 
