@@ -222,6 +222,8 @@ internal static class HandlingConfig
 	public static ConfigEntry<bool> JitterProbe { get; private set; }
 
 	public static ConfigEntry<bool> ScopeVanilla { get; private set; }
+	public static ConfigEntry<float> AdsMotion { get; private set; }
+	public static ConfigEntry<bool> SightLock { get; private set; }
 	public static ConfigEntry<float> ScopedHipDrop { get; private set; }
 
 
@@ -310,6 +312,8 @@ internal static class HandlingConfig
 		DeadzoneAds = config.Bind("04 - ADS Weapon Handling", "ADS lag limit (deg)", 12f, new ConfigDescription("Maximum weapon-to-camera separation while aiming down sights.", new AcceptableValueRange<float>(0f, 12f)));
 		AdsFollowTightness = config.Bind("04 - ADS Weapon Handling", "ADS follow tightness", 0.3826291f, D("How tightly the aimed weapon follows the camera. 0 = heavy delayed catch-up, 1 = complete immediate follow. Weapon weight, ergonomics, movement and fatigue are calculated automatically.", 0f, 1f, true));
 		ScopeVanilla = config.Bind("04 - ADS Weapon Handling", "Vanilla handling through scopes", true, Toggle("While aiming through a magnified scope (1.5x and up), TrueView lets go: no ADS deadzone, lead, cant or float on the gun, no lean, momentum, camera lag or body camera on the view, and only the game's own sway, breathing and tremor. Keeps the lens and the scope shadow lined up. Red dots, iron sights and 1x optics are unchanged."));
+		AdsMotion = config.Bind("04 - ADS Weapon Handling", "ADS motion (%)", 100f, D("One slider for the sway while you aim down sights: the left-right cant, hand float and bank on turns on the gun; lean, turn roll, momentum, camera lag and step turning on the view; sway and tremor; and the body camera. The ADS deadzone itself is never touched: the gun still lags and leads when you turn and settles back. 100 = full TrueView sway, 50 = half, 0 = the aim holds steady whenever you stop turning. Hip fire is never affected.", 0f, 100f, false));
+		SightLock = config.Bind("04 - ADS Weapon Handling", "Sight lock", true, Toggle("Iron sights and red dots stay perfectly lined up while aiming. The view turns with the gun, so the rear and front sight never drift apart; the weight, lag and lead of the ADS deadzone still play, the whole picture moves instead of the sights inside it. Off = the gun moves inside a steady view (the older feel), and the sights can separate during fast turns."));
 		ScopedHipDrop = config.Bind("04 - ADS Weapon Handling", "Scoped hip carry drop (cm)", 2f, D("With a magnified scope mounted, the gun is carried this much lower at the hip so the scope bell stops covering the middle of the screen. Position only, the muzzle still points where the deadzone aims. 0 = off.", 0f, 6f, false));
 		AimingEnabled = config.Bind("05 - Aiming Speed & Weight", "Enable aiming changes", true, Toggle("Scale ADS speed by weapon weight, ergonomics and hands stamina."));
 		LightWeightKg = config.Bind("05 - Aiming Speed & Weight", "Light weapon weight (kg)", 2f, D("Weight treated as a light weapon.", 0.5f, 8f, true));

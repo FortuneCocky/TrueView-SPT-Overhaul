@@ -65,16 +65,25 @@ internal class Patch_SetHeadRotation : ModulePatch
 
 		headRot = TurnInPlaceSystem.ModifyCamera(headRot);
 
-		// Through a magnified scope the view is the game's own: lean, roll,
-		// momentum, camera lag and the deadzone camera all hand back.
+		// ADS motion (%): lean, roll, momentum, camera lag and step turning
+		// fade back to the deadzone's own view, which stays whole.
+		headRot = Blend(baseRot, headRot, ScopeOpticsSystem.AdsMotionKeep);
+
+		// Through a magnified scope the view is the game's own: the deadzone
+		// camera hands back too.
 		float scoped = ScopeOpticsSystem.Magnified;
 		if (scoped > 0f)
-		{
-			headRot = new Vector3(
-				vanillaRot.x + Mathf.DeltaAngle(vanillaRot.x, headRot.x) * (1f - scoped),
-				vanillaRot.y + Mathf.DeltaAngle(vanillaRot.y, headRot.y) * (1f - scoped),
-				vanillaRot.z + Mathf.DeltaAngle(vanillaRot.z, headRot.z) * (1f - scoped));
-		}
+			headRot = Blend(vanillaRot, headRot, 1f - scoped);
 		HandlingState.HeadRotation = headRot;
+	}
+
+	private static Vector3 Blend(Vector3 from, Vector3 to, float keep)
+	{
+		if (keep >= 0.999f)
+			return to;
+		return new Vector3(
+			from.x + Mathf.DeltaAngle(from.x, to.x) * keep,
+			from.y + Mathf.DeltaAngle(from.y, to.y) * keep,
+			from.z + Mathf.DeltaAngle(from.z, to.z) * keep);
 	}
 }

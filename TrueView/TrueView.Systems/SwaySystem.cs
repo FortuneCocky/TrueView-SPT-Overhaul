@@ -26,9 +26,11 @@ internal static class SwaySystem
 			// Through a magnified scope the game's own sway takes over (its
 			// values: breath x1, motion 0.45, no tremor).
 			float vanilla = isAiming ? ScopeOpticsSystem.Magnified : 0f;
+			// ADS motion (%) scales TrueView's own aimed sway and tremor.
+			float adsKeep = ScopeOpticsSystem.AdsMotionKeep;
 			float weightProgress = HandlingState.Stats.WeightProgress;
 			float num2 = (isAiming ? HandlingConfig.AimSwayMultiplier.Value : HandlingConfig.HipSwayMultiplier.Value);
-			float num3 = num2 * num * _breathStabilize;
+			float num3 = num2 * num * _breathStabilize * adsKeep;
 			if (animation.Breath != null)
 			{
 				animation.Breath.Intensity = animation.IntensityByPoseLevel * animation.IntensityByAiming * Mathf.Lerp(num3, 1f, vanilla);
@@ -41,9 +43,9 @@ internal static class SwaySystem
 				// Tired arms also swing the gun further around when you move and turn.
 				float armsLoose = 1f + 0.4f * Mathf.Pow(1f - HandlingState.HandsStamina01, 2f);
 				float motion = 0.45f * HandlingConfig.MotionInertiaMultiplier.Value * (1f + 0.35f * weightProgress) * armsLoose * _breathStabilize;
-				animation.MotionReact.Intensity = Mathf.Lerp(motion, 0.45f, vanilla);
+				animation.MotionReact.Intensity = Mathf.Lerp(motion * adsKeep, 0.45f, vanilla);
 			}
-			ApplyTremor(animation, num * _breathStabilize, 1f - vanilla);
+			ApplyTremor(animation, num * _breathStabilize, (1f - vanilla) * adsKeep);
 		}
 	}
 

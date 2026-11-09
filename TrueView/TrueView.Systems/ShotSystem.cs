@@ -23,6 +23,9 @@ internal static class ShotSystem
 
 	public static bool InShotRecovery => Time.unscaledTime - _lastShotTime < ShotRecoveryWindow;
 
+	/// <summary>0 at a shot, 1 once its recovery window is over.</summary>
+	public static float RecoveryProgress => Mathf.Clamp01((Time.unscaledTime - _lastShotTime) / ShotRecoveryWindow);
+
 	public static void OnShot()
 	{
 		_lastShotTime = Time.unscaledTime;

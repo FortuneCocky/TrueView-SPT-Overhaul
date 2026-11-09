@@ -218,7 +218,7 @@ internal static class BodyCamSystem
         _adsBlend = Mathf.MoveTowards(_adsBlend, HandlingState.IsAiming ? 1f : 0f, 6f * dt);
         // A scope magnifies every wobble of the head, so it always fades fully there.
         float adsFade = Mathf.Max(Mathf.Clamp01(HandlingConfig.BodyCamAdsFade?.Value ?? 1f), ScopeOpticsSystem.Magnified);
-        float bodyScale = 1f - _adsBlend * adsFade;
+        float bodyScale = (1f - _adsBlend * adsFade) * ScopeOpticsSystem.AdsMotionKeep;
 
         TickTorsoLag(on, dt);
         TickSteps(player, on, dt);
@@ -263,8 +263,9 @@ internal static class BodyCamSystem
         // Sprinting pitches the chest forward; no head keeps it level.
         float sprintPitch = _sprintBlend * 2.5f * (on ? HandlingConfig.BodyCamUnstabilised?.Value ?? 0f : 0f);
 
-        // A magnified scope shows every wobble, so the stock bump stays out of it.
-        float bumpScale = 1f - ScopeOpticsSystem.Magnified;
+        // A magnified scope shows every wobble, so the stock bump stays out of
+        // it; ADS motion (%) scales it for every sight.
+        float bumpScale = ScopeOpticsSystem.AimKeep;
 
         Vector3 body = new Vector3(_lag.y + breathPitch + sprintPitch, _lag.x, mountRoll + _leanRoll) + _stepRot + _stepWander;
         Vector3 euler = (body + _jolt) * bodyScale + _knock + _injuryDrift + _bump * bumpScale;

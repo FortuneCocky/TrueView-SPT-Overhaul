@@ -267,7 +267,26 @@ internal static class ProceduralHipSystem
             _recoilAnchor = _weaponRot;
             _recoilReturnActive = true;
         }
-        _weaponRot = Quaternion.Euler(pitch, yaw, 0f) * _weaponRot;
+        // Played out over a few frames by UpdateShotPush: putting it all on
+        // in one frame read as the gun teleporting on every hip shot.
+        _pushPending += new Vector2(pitch, yaw);
+    }
+
+    // Shot push still to come (pitch, yaw), and how fast it goes on:
+    // ~63% in 15 ms, all of it in about 50 ms.
+    private static Vector2 _pushPending;
+    private const float PushRate = 65f;
+
+    private static void UpdateShotPush(float dt)
+    {
+        if (_pushPending.sqrMagnitude < 1e-8f)
+        {
+            _pushPending = Vector2.zero;
+            return;
+        }
+        Vector2 step = _pushPending * (1f - Mathf.Exp(-PushRate * dt));
+        _pushPending -= step;
+        _weaponRot = Quaternion.Euler(step.x, step.y, 0f) * _weaponRot;
     }
 
     /// <summary>
@@ -327,13 +346,22 @@ internal static class ProceduralHipSystem
     /// not reset the transform since our last write, the previous offset is
     /// removed first — so the offset can never accumulate frame to frame.
     /// </summary>
-    public static void ApplyWeaponPosOffset(Transform weaponRoot)
+    /// <para>Sight lock: <paramref name="eye"/> is where the game is placing the
+    /// aiming camera (weapon root parent space). The gun's turn is then made
+    /// about that point instead of the root, so the eye stays on the sight
+    /// line however far the ADS deadzone turns the gun.</para>
+    public static void ApplyWeaponPosOffset(Transform weaponRoot, Quaternion gunTurn, Vector3 eye, float sightLock)
     {
         if (_appliedPosOffset != Vector3.zero && weaponRoot.localPosition == _lastPosResult)
             weaponRoot.localPosition -= _appliedPosOffset;
         // Weapon offsets only — the body camera is applied at render time and
         // never reaches the gun, so nothing here may read camera motion.
         Vector3 offset = _cachedWeaponPosOffset;
+        if (sightLock > 0.001f)
+        {
+            Vector3 rel = eye - weaponRoot.localPosition;
+            offset = Vector3.Lerp(offset, rel - gunTurn * rel, sightLock);
+        }
         weaponRoot.localPosition += offset;
         _appliedPosOffset = offset;
         _lastPosResult = weaponRoot.localPosition;
@@ -535,9 +563,13 @@ internal static class ProceduralHipSystem
                 _recoilAnchor = LimitPitch(_recoilAnchor, target, pitchLimit, 1f);
         }
 
+        UpdateShotPush(trackDt);
         if (_recoilReturnActive)
         {
-            float returnSpeed = ShotSystem.InShotRecovery ? 3.5f : 11f;
+            // Slow while the shot settles, then eases up to the full return
+            // speed. It used to jump from one to the other the moment the
+            // window ended, a visible lurch just after you stopped firing.
+            float returnSpeed = Mathf.SmoothStep(3.5f, 11f, Mathf.InverseLerp(0.4f, 1f, ShotSystem.RecoveryProgress));
             _weaponRot = Quaternion.Slerp(
                 _weaponRot,
                 _recoilAnchor,
@@ -708,8 +740,13 @@ internal static class ProceduralHipSystem
             baseOffset = kickRot * baseOffset;
         }
 
+        // ADS motion (%) scales the aimed sway on the gun (float, cant and the
+        // bank on turns) but never the deadzone itself: the lag and lead
+        // yaw on turns stay whole, so at 0 a still aim is steady.
+        float adsSway = ScopeOpticsSystem.AdsMotionKeep;
+
         if (HandlingState.IsAiming && _adsFloat != Vector2.zero)
-            baseOffset = Quaternion.Euler(_adsFloat.y, _adsFloat.x, 0f) * baseOffset;
+            baseOffset = Quaternion.Euler(_adsFloat.y * adsSway, _adsFloat.x * adsSway, 0f) * baseOffset;
 
         // Hard deadzone: lag + wrist lead + muzzle bend share one yaw budget.
         // Smooth tanh limit keeps the total inside the zone so the gun never
@@ -734,7 +771,7 @@ internal static class ProceduralHipSystem
             : HandlingConfig.AdsLeadStrength;
         if (leadStrength > 0.001f)
         {
-            Quaternion leadRot = Quaternion.Euler(0f, leadYawUse, _leadRoll);
+            Quaternion leadRot = Quaternion.Euler(0f, leadYawUse, _leadRoll * adsSway);
             // Pivot the turn at the hands: the rotation is applied about a
             // point at the grip (below/ahead of the camera) instead of the
             // weapon root, so the grip stays planted while the muzzle
@@ -781,11 +818,12 @@ internal static class ProceduralHipSystem
 
         // Canted aim: the gun rolls about the sight line instead of sitting
         // level, and the sight drifts a little off-centre with the cant.
-        if (Mathf.Abs(_adsCant) > 0.01f)
+        float cant = _adsCant * adsSway;
+        if (Mathf.Abs(cant) > 0.01f)
         {
-            Quaternion cantRot = Quaternion.Euler(0f, 0f, _adsCant);
+            Quaternion cantRot = Quaternion.Euler(0f, 0f, cant);
             posOffset += MuzzleSightPivot - cantRot * MuzzleSightPivot;
-            posOffset += new Vector3(-0.0011f * _adsCant, -0.0007f * Mathf.Abs(_adsCant), 0f);
+            posOffset += new Vector3(-0.0011f * cant, -0.0007f * Mathf.Abs(cant), 0f);
             baseOffset = cantRot * baseOffset;
         }
 
@@ -1251,6 +1289,7 @@ internal static class ProceduralHipSystem
                 _weaponRot = rawCamera;
                 _recoilAnchor = rawCamera;
                 _recoilReturnActive = false;
+                _pushPending = Vector2.zero;
             }
             _lazyYawVel = 0f;
             _lazyPitchVel = 0f;
@@ -1320,6 +1359,7 @@ internal static class ProceduralHipSystem
         _cameraRot = Quaternion.identity;
         _recoilAnchor = Quaternion.identity;
         _recoilReturnActive = false;
+        _pushPending = Vector2.zero;
         _cameraSettlePending = false;
         _cameraSettleActive = false;
         _lastAiming = false;

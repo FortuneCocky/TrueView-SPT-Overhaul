@@ -28,8 +28,32 @@ internal static class ScopeOpticsSystem
     private static float _scopedHip;
     private static float _logZoom;
 
+    private static float _aimBlend;
+    private static float _calm;
+
     public static float Magnified => _magnified;
     public static float ScopedHip => _scopedHip;
+
+    /// <summary>
+    /// 0..1: how far TrueView's motion hands back to the game right now.
+    /// The magnified-scope blend, plus what ADS motion (%) takes away while
+    /// aiming through any sight. 0 at the hip.
+    /// </summary>
+    public static float Calm => _calm;
+
+    /// <summary>How much TrueView motion stays while aiming (1 - Calm), for layers that only scale.</summary>
+    public static float AimKeep => 1f - _calm;
+
+    /// <summary>ADS motion (%) alone, blended in while aiming: 1 at the hip.</summary>
+    public static float AdsMotionKeep => _adsMotionKeep;
+
+    private static float _adsMotionKeep = 1f;
+
+    /// <summary>
+    /// 0..1: Sight lock, blended in while aiming. The view takes the gun's
+    /// TrueView rotation so the sights stay lined up.
+    /// </summary>
+    public static float SightLock => (HandlingConfig.SightLock?.Value ?? false) ? _aimBlend : 0f;
 
     public static void Tick(Player player, float dt)
     {
@@ -51,6 +75,10 @@ internal static class ScopeOpticsSystem
             && (HandlingConfig.ScopeVanilla?.Value ?? true);
         _magnified = Mathf.MoveTowards(_magnified, magnified ? 1f : 0f, 6f * dt);
         _scopedHip = Mathf.MoveTowards(_scopedHip, !aiming && mounted ? 1f : 0f, 4f * dt);
+        _aimBlend = Mathf.MoveTowards(_aimBlend, aiming ? 1f : 0f, 6f * dt);
+        float adsKeep = Mathf.Clamp01((HandlingConfig.AdsMotion?.Value ?? 100f) / 100f);
+        _adsMotionKeep = 1f - _aimBlend * (1f - adsKeep);
+        _calm = 1f - (1f - _magnified) * _adsMotionKeep;
 
         if (magnified && Mathf.Abs(zoom - _logZoom) > 0.05f)
         {
@@ -95,6 +123,9 @@ internal static class ScopeOpticsSystem
     {
         _magnified = 0f;
         _scopedHip = 0f;
+        _aimBlend = 0f;
+        _calm = 0f;
+        _adsMotionKeep = 1f;
         _logZoom = 0f;
     }
 }

@@ -1,6 +1,7 @@
 using System.Reflection;
 using EFT;
 using EFT.Animations;
+using HarmonyLib;
 using TrueView.Configuration;
 using TrueView.Core;
 using TrueView.Systems;
@@ -16,6 +17,64 @@ internal class Patch_CalculateCameraPosition : ModulePatch
     protected override MethodBase GetTargetMethod()
     {
         return typeof(ProceduralWeaponAnimation).GetMethod("CalculateCameraPosition", BindingFlags.Instance | BindingFlags.Public);
+    }
+
+    // Sight lock: while aiming the game already places the camera on the
+    // gun's sight line (behind the sight, along the gun). Turning the view by
+    // the same rotation TrueView gave the gun makes the camera look straight
+    // down that line, so rear and front sight stay lined up exactly. The
+    // rotation is in the weapon root's parent space; the camera gets it in
+    // world space, about its own position. The camera rotation is written
+    // last in LerpCamera, so this frame's turn is kept here and applied there.
+    // The game rewrites the camera's rotation every frame, so nothing builds up.
+    private static Quaternion _lockTurn = Quaternion.identity;
+    private static Transform _lockParent;
+    private static int _lockFrame = -1;
+
+    private static void KeepSightLock(Transform weaponParent, Quaternion gunTurn)
+    {
+        _lockTurn = gunTurn;
+        _lockParent = weaponParent;
+        _lockFrame = Time.frameCount;
+    }
+
+    internal static void ApplySightLock(Transform camera)
+    {
+        float lockAmount = ScopeOpticsSystem.SightLock;
+        if (lockAmount < 0.001f || camera == null || _lockParent == null || Time.frameCount - _lockFrame > 1)
+            return;
+        Quaternion parent = _lockParent.rotation;
+        Quaternion worldTurn = parent * _lockTurn * Quaternion.Inverse(parent);
+        camera.rotation = Quaternion.Slerp(Quaternion.identity, worldTurn, lockAmount) * camera.rotation;
+    }
+
+    private static readonly AccessTools.FieldRef<ProceduralWeaponAnimation, Vector3> CameraTarget =
+        AccessTools.FieldRefAccess<ProceduralWeaponAnimation, Vector3>("_vCameraTarget");
+
+    // Sight lock: the game works out the aiming camera's spot from the sight's
+    // position on the gun. With TrueView's offset still on the gun it would
+    // aim the camera at the shifted gun, and the eye would drift off the sight
+    // line, so the gun goes back to its clean pose for that calculation.
+    [PatchPrefix]
+    private static void Prefix(ProceduralWeaponAnimation __instance)
+    {
+        if (_lastFrame == Time.frameCount || !HandlingState.Enabled || ScopeOpticsSystem.SightLock < 0.001f)
+            return;
+        Player player = HandlingManager.LocalPlayer();
+        if (player == null || player.ProceduralWeaponAnimation != __instance || player.HandsController is not Player.FirearmController)
+            return;
+        Transform weaponRoot = __instance.HandsContainer?.WeaponRoot;
+        if (weaponRoot != null)
+            ProceduralHipSystem.ClearWeaponPosOffset(weaponRoot);
+    }
+
+    // Where the game is putting the aiming camera, in the weapon root's parent space.
+    private static Vector3 AimEye(ProceduralWeaponAnimation pwa, Transform weaponRoot)
+    {
+        Transform camParent = pwa.HandsContainer?.CameraTransform?.parent;
+        if (camParent == null || weaponRoot.parent == null)
+            return weaponRoot.localPosition;
+        return weaponRoot.parent.InverseTransformPoint(camParent.TransformPoint(CameraTarget(pwa)));
     }
 
     [PatchPostfix]
@@ -75,8 +134,13 @@ internal class Patch_CalculateCameraPosition : ModulePatch
 
             if (!isLeftStance)
             {
-                __instance.HandsContainer.WeaponRoot.localRotation = BarrelAimSystem.Correction * ProceduralHipSystem.WeaponOffset * __instance.HandsContainer.WeaponRoot.localRotation;
-                ProceduralHipSystem.ApplyWeaponPosOffset(__instance.HandsContainer.WeaponRoot);
+                Transform weaponRoot = __instance.HandsContainer.WeaponRoot;
+                Quaternion gunTurn = BarrelAimSystem.Correction * ProceduralHipSystem.WeaponOffset;
+                weaponRoot.localRotation = gunTurn * weaponRoot.localRotation;
+                float sightLock = ScopeOpticsSystem.SightLock;
+                Vector3 eye = sightLock > 0.001f ? AimEye(__instance, weaponRoot) : Vector3.zero;
+                ProceduralHipSystem.ApplyWeaponPosOffset(weaponRoot, gunTurn, eye, sightLock);
+                KeepSightLock(weaponRoot.parent, gunTurn);
                 JitterProbe.AfterTrueView();
             }
             else

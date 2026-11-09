@@ -110,7 +110,10 @@ internal static class HandlingState
 		if (movementContext != null)
 		{
 			float num = Mathf.Max(movementContext.MaxSpeed, 0.1f);
-			MovementSpeed01 = Mathf.Clamp01(movementContext.CharacterMovementSpeed / num);
+			// CharacterMovementSpeed is the walk speed setting (mouse wheel),
+			// set even while standing, so it only counts while you actually move.
+			float moving = Mathf.Clamp01(MotionTracker.GroundSpeed);
+			MovementSpeed01 = Mathf.Clamp01(movementContext.CharacterMovementSpeed / num) * moving;
 			IsSprinting = movementContext.IsSprintEnabled;
 			IsHoldingBreath = movementContext.IsHoldingBreath();
 		}

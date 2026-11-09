@@ -60,6 +60,7 @@ internal class Patch_LerpCamera : ModulePatch
 
         JitterProbe.VanillaCamera(__instance);
         ApplyCamera(__instance, dt);
+        Patch_CalculateCameraPosition.ApplySightLock(__instance.HandsContainer?.CameraTransform);
         ClampCameraPushback(__instance, player);
     }
 
